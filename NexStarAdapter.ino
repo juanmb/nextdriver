@@ -1,6 +1,7 @@
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
-#include "nexstar.h"
+#include "serial_command.h"
+#include "nexstar_serial.h"
 
 
 #define VERSION_MAJOR 3
@@ -8,20 +9,14 @@
 #define MOUNT_MODEL 10  // GT
 #define BAUDRATE 9600
 
-#define AUX_RX_PIN 10
-#define AUX_TX_PIN 11
-#define AUX_ENABLE_PIN 12
+#define AUX_SELECT 5
+#define AUX_RX 6
+#define AUX_TX 7
 
 
 SerialCommand sCmd;
-SoftwareSerial auxSerial(AUX_RX_PIN, AUX_TX_PIN);
+NexStartSerial auxSerial(AUX_RX, AUX_TX, AUX_SELECT);
 
-
-char calcCRC(char *packet, int length)
-{
-    //TODO
-    return '\0';
-}
 
 void cmdGetEqCoords(char *cmd)
 {
@@ -68,7 +63,7 @@ void cmdSyncEqCoords(char *cmd)
 void cmdGetLocation(char *cmd)
 {
     // Read the location from EEPROM
-    for (int i=0; i<8; i++) {
+    for (int i = 0; i < 8; i++) {
         Serial.write(EEPROM.read(i));
     }
     Serial.write('#');
@@ -77,8 +72,8 @@ void cmdGetLocation(char *cmd)
 void cmdSetLocation(char *cmd)
 {
     // Store the location in EEPROM
-    for (int i=0; i<8; i++) {
-        EEPROM.write(i, cmd[i+1]);
+    for (int i = 0; i < 8; i++) {
+        EEPROM.write(i, cmd[i + 1]);
     }
     Serial.write('#');
 }
@@ -97,23 +92,21 @@ void cmdSetTime(char *cmd)
 
 void cmdPassThrough(char *cmd)
 {
-    char packet[8];
-    char length = cmd[1];
+    nexstar_message resp;
+    uint8_t size = cmd[1] - 1;
 
-    packet[0] = 0x3b;   // start byte
-    packet[1] = length; // packet length
-    packet[2] = 0x04;   // source device (hand controller)
-    memcpy(packet + 3, cmd + 2, length);
-
-    packet[length + 2] = calcCRC(packet, length);
-
-    digitalWrite(AUX_ENABLE_PIN, HIGH);
-    for (int i=0; i<length+3; i++) {
-        auxSerial.write(packet[i]);
+    // pass the command to the mount
+    int ret = auxSerial.sendMessage(cmd[2], cmd[3], size, &cmd[4], &resp);
+    if (ret != 0) {
+        // TODO: return a response with size = normal_return_size + 1
+        Serial.print(ret);
+        Serial.write('#');
+        return;
     }
-    digitalWrite(AUX_ENABLE_PIN, LOW);
 
-    //TODO
+    for (int i = 0; i < resp.header.length - 3; i++) {
+        Serial.write(resp.payload[i]);
+    }
     Serial.write('#');
 }
 
@@ -163,10 +156,10 @@ void setup()
     //sCmd.addCommand('x', 1, cmdHibernate);
     //sCmd.addCommand('y', 1, cmdWakeup);
 
-    pinMode(AUX_ENABLE_PIN, OUTPUT);
+    pinMode(AUX_SELECT, OUTPUT);
 
     Serial.begin(BAUDRATE);
-    auxSerial.begin(19200);
+    auxSerial.begin();
 }
 
 void loop()

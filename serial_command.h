@@ -6,8 +6,8 @@
 
 *******************************************************************************/
 
-#ifndef _SkyPointer_h_
-#define _SkyPointer_h_
+#ifndef _SerialCommand_h_
+#define _SerialCommand_h_
 
 #include <inttypes.h>
 
@@ -25,19 +25,18 @@ typedef struct commandCallback {
 } commandCallback;
 
 
-class SerialCommand
-{
-    public:
-        SerialCommand();
-        void readSerial();
-        int addCommand(const char, uint8_t, cbFunction);
-    private:
-        commandCallback commandList[MAX_COMMANDS];
-        char buffer[MAX_CMD_SIZE];
-        cbFunction cmdFunction;
-        int nCommands;
-        int cmdSize;
-        int bufPos;
+class SerialCommand {
+public:
+    SerialCommand();
+    void readSerial();
+    int addCommand(const char, uint8_t, cbFunction);
+private:
+    commandCallback commandList[MAX_COMMANDS];
+    char buffer[MAX_CMD_SIZE];
+    cbFunction cmdFunction;
+    int nCommands;
+    int cmdSize;
+    int bufPos;
 };
 
 #endif

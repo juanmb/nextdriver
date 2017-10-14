@@ -7,10 +7,10 @@
 # Source code can be downloaded from:
 # 	https://github.com/sudar/Arduino-Makefile
 
-BOARD_TAG    = atmega328
+BOARD_TAG    = uno
 ARDUINO_LIBS = SoftwareSerial EEPROM
 ARDUINO_LIBS += Wire
-ARDUINO_PORT = /dev/ttyUSB0
+ARDUINO_PORT = /dev/ttyACM0
 
 include /usr/share/arduino/Arduino.mk
 

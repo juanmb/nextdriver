@@ -4,7 +4,9 @@
 
 This is an USB adapter for Celestron NexStar AUX protocol implemented in Arduino.
 It acts like a hand controller, receiving the commands from the PC (HC
-procotol) and communicating with the mount boards (AUX protocol).
+procotol) and communicating with the mount (AUX protocol).
+
+![](block_diagram.png)
 
 Documentation:
 
@@ -18,10 +20,3 @@ The provided Makefile requires [Arduino-Makefile](https://github.com/sudar/Ardui
 to work. In Debian/Ubuntu/Mint, you can install it with
 
     sudo apt-get install arduino-mk
-
-## Required libraries
-
-You will need the following third-party Arduino libraries before compiling this
-project:
-
- * [SerialCommand](https://github.com/scogswell/ArduinoSerialCommand)

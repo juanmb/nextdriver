@@ -7,7 +7,7 @@
 *******************************************************************************/
 
 #include <Arduino.h>
-#include "nexstar.h"
+#include "serial_command.h"
 
 
 SerialCommand::SerialCommand()
@@ -37,7 +37,7 @@ void SerialCommand::readSerial()
 
         if (bufPos == 0) {
             cmdSize = 0;
-            for (int i=0; i<nCommands; i++) {
+            for (int i = 0; i < nCommands; i++) {
                 if (commandList[i].firstChar == c) {
                     cmdSize = commandList[i].size;
                     cmdFunction = commandList[i].function;

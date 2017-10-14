@@ -1,0 +1,4 @@
+set wildignore+=*.orig
+let NERDTreeIgnore=['\.o$', '\.orig$']
+
+set softtabstop=4 sw=4 ts=4 et
