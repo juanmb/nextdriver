@@ -1,7 +1,7 @@
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 #include "serial_command.h"
-#include "nexstar_serial.h"
+#include "nexstar_aux.h"
 
 
 #define VERSION_MAJOR 3
@@ -15,48 +15,106 @@
 
 
 SerialCommand sCmd;
-NexStartSerial auxSerial(AUX_RX, AUX_TX, AUX_SELECT);
+NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
 
 
 void cmdGetEqCoords(char *cmd)
 {
-    //TODO
-    Serial.write("34AB,12CE#");
+    uint32_t ra_pos, dec_pos;
+    scope.getPosition(DEV_RA, &ra_pos);
+    scope.getPosition(DEV_DEC, &dec_pos);
+    ra_pos = (ra_pos >> 8) & 0xffff;
+    dec_pos = (dec_pos >> 8) & 0xffff;
+
+    char tmp[11];
+    sprintf(tmp, "%04lX,%04lX#", ra_pos, dec_pos);
+    Serial.write(tmp);
+}
+
+void cmdGetEqPreciseCoords(char *cmd)
+{
+    uint32_t ra_pos, dec_pos;
+    scope.getPosition(DEV_RA, &ra_pos);
+    scope.getPosition(DEV_DEC, &dec_pos);
+
+    char tmp[19];
+    sprintf(tmp, "%08lX,%08lX#", ra_pos << 8, dec_pos << 8);
+    Serial.write(tmp);
 }
 
 void cmdGetAzCoords(char *cmd)
 {
     //TODO
-    Serial.write("12AB,4000#");
+    cmdGetEqCoords(cmd);
+}
+
+void cmdGetAzPreciseCoords(char *cmd)
+{
+    //TODO
+    cmdGetEqPreciseCoords(cmd);
 }
 
 void cmdGotoEqCoords(char *cmd)
 {
-    //TODO
+    uint32_t ra_pos, dec_pos;
+    sscanf(cmd, "R%4lx,%4lx", &ra_pos, &dec_pos);
+    scope.gotoPosition(DEV_RA, false, ra_pos);
+    scope.gotoPosition(DEV_DEC, false, dec_pos);
+    Serial.write('#');
+}
+
+void cmdGotoEqPreciseCoords(char *cmd)
+{
+    uint32_t ra_pos, dec_pos;
+    sscanf(cmd, "r%8lx,%8lx", &ra_pos, &dec_pos);
+    scope.gotoPosition(DEV_RA, false, ra_pos);
+    scope.gotoPosition(DEV_DEC, false, dec_pos);
     Serial.write('#');
 }
 
 void cmdGotoAzCoords(char *cmd)
 {
     //TODO
-    Serial.write('#');
+    cmdGotoEqCoords(cmd);
+}
+
+void cmdGotoAzPreciseCoords(char *cmd)
+{
+    //TODO
+    cmdGotoEqPreciseCoords(cmd);
 }
 
 void cmdGotoInProgress(char *cmd)
 {
-    //TODO
-    Serial.write("0#");
+    bool ra_done, dec_done;
+    scope.slewDone(DEV_RA, &ra_done);
+    scope.slewDone(DEV_DEC, &dec_done);
+    Serial.write((ra_done && dec_done) ? '0' : '1');
+    Serial.write('#');
 }
 
 void cmdCancelGoto(char *cmd)
 {
-    //TODO
+    scope.move(DEV_RA, 0, 0);
+    scope.move(DEV_DEC, 0, 0);
     Serial.write('#');
 }
 
 void cmdSyncEqCoords(char *cmd)
 {
-    //TODO
+    uint32_t ra_pos, dec_pos;
+    sscanf(cmd, "S%4lx,%4lx", &ra_pos, &dec_pos);
+    scope.setPosition(DEV_RA, ra_pos << 8);
+    scope.setPosition(DEV_DEC, dec_pos << 8);
+    Serial.write('#');
+}
+
+void cmdSyncEqPreciseCoords(char *cmd)
+{
+    uint32_t ra_pos, dec_pos;
+    sscanf(cmd, "s%8lx,%8lx", &ra_pos, &dec_pos);
+    scope.setPosition(DEV_RA, ra_pos >> 8);
+    scope.setPosition(DEV_DEC, dec_pos >> 8);
     Serial.write('#');
 }
 
@@ -92,11 +150,11 @@ void cmdSetTime(char *cmd)
 
 void cmdPassThrough(char *cmd)
 {
-    nexstar_message resp;
+    NexStarMessage resp;
     uint8_t size = cmd[1] - 1;
 
     // pass the command to the mount
-    int ret = auxSerial.sendMessage(cmd[2], cmd[3], size, &cmd[4], &resp);
+    int ret = scope.sendMessage(cmd[2], cmd[3], size, &cmd[4], &resp);
     if (ret != 0) {
         // TODO: return a response with size = normal_return_size + 1
         Serial.print(ret);
@@ -133,14 +191,19 @@ void setup()
 {
     // Map serial commands to functions
     sCmd.addCommand('E', 1, cmdGetEqCoords);
+    sCmd.addCommand('e', 1, cmdGetEqPreciseCoords);
     sCmd.addCommand('Z', 1, cmdGetAzCoords);
+    sCmd.addCommand('a', 1, cmdGetAzPreciseCoords);
 
     sCmd.addCommand('R', 10, cmdGotoEqCoords);
+    sCmd.addCommand('r', 18, cmdGotoEqPreciseCoords);
     sCmd.addCommand('B', 10, cmdGotoAzCoords);
+    sCmd.addCommand('b', 18, cmdGotoAzPreciseCoords);
     sCmd.addCommand('L', 1, cmdGotoInProgress);
     sCmd.addCommand('M', 1, cmdCancelGoto);
 
-    sCmd.addCommand('s', 10, cmdSyncEqCoords);
+    sCmd.addCommand('S', 10, cmdSyncEqCoords);
+    sCmd.addCommand('s', 18, cmdSyncEqPreciseCoords);
 
     sCmd.addCommand('w', 1, cmdGetLocation);
     sCmd.addCommand('W', 9, cmdSetLocation);
@@ -159,7 +222,7 @@ void setup()
     pinMode(AUX_SELECT, OUTPUT);
 
     Serial.begin(BAUDRATE);
-    auxSerial.begin();
+    scope.begin();
 }
 
 void loop()

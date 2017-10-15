@@ -17,7 +17,7 @@ def to_hex(data):
 
 
 class NexStarComm(object):
-    def __init__(self, port, debug=True):
+    def __init__(self, port, debug=False):
         self.debug = debug
         self.serial = serial.Serial(port, 9600, timeout=1)
         print "Wait until Arduino is ready..."
@@ -25,12 +25,12 @@ class NexStarComm(object):
 
     def send_packet(self, data, resp_len):
         if self.debug:
-            print "Sent:", to_hex(data)
+            print "Sent:", data
         self.serial.write(data)
         self.serial.flushInput()
         resp = self.serial.read(resp_len)
         if self.debug:
-            print "Recv:", to_hex(resp)
+            print "Recv:", resp
         return resp
 
     def send_passthrough(self, dest, Id, payload='', resp_len=0):
@@ -60,18 +60,61 @@ class NexStarComm(object):
         payload = struct.pack('B', rate)
         self.send_passthrough(RA_DEV, _id, payload)
 
+    def get_eq_coords(self, precise=False):
+        if precise:
+            ret = self.send_packet('e', 18)
+        else:
+            ret = self.send_packet('E', 10)
+
+        return [int(a, 16) for a in ret.strip('#').split(',')]
+
+    def set_eq_coords(self, ra, dec, precise=False):
+        if precise:
+            self.send_packet('s%08X,%08X' % (ra, dec), 1)
+        else:
+            self.send_packet('S%04X,%04X' % (ra, dec), 1)
+
+    def goto_eq_coords(self, ra, dec, precise=False):
+        if precise:
+            self.send_packet('r%08X,%08X' % (ra, dec), 1)
+        else:
+            self.send_packet('R%04X,%04X' % (ra, dec), 1)
+
+    def cancel_goto(self):
+        self.send_packet('M', 1)
+
+    def is_slewing(self):
+        ret = self.send_packet('L', 2)
+        return ret[0] != '\0'
+
 
 if __name__ == '__main__':
-    nex = NexStarComm('/dev/ttyACM0')
+    nex = NexStarComm('/dev/ttyACM0', True)
 
-    print nex.get_model()
-    print nex.get_version()
-    print nex.get_device_version(RA_DEV)
-    print nex.get_device_version(DEC_DEV)
+    # print "Model:\t", nex.get_model()
+    # print "Version:\t", nex.get_version()
+    # print "RA version:\t", nex.get_device_version(RA_DEV)
+    # print "Dec version:\t", nex.get_device_version(DEC_DEV)
 
-    nex.slew_ra(8, 1)
-    time.sleep(4)
-    nex.slew_ra(8, 0)
-    time.sleep(4)
-    nex.slew_ra(0, 0)
+    # nex.set_eq_coords(0xfedc, 0x5678)
+    # nex.set_eq_coords(0xf2345600, 0xf3456700, precise=True)
+    # print nex.get_eq_coords(precise=True)
+    # print nex.get_eq_coords(precise=False)
+
+    #nex.set_eq_coords(0x0000, 0x0000)
+    nex.goto_eq_coords(0xff00, 0x0000)
+
+    for i in range(10):
+        #print nex.is_slewing()
+        print nex.get_eq_coords(precise=True)
+        time.sleep(1)
+
+    # nex.cancel_goto()
+
+    # time.sleep(0.1)
+    # nex.cancel_goto()
+
+    # nex.slew_ra(8, 0)
+    # time.sleep(1)
+    # nex.slew_ra(0, 0)
 

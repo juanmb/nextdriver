@@ -7,10 +7,28 @@
 *******************************************************************************/
 
 #include <Arduino.h>
-#include "nexstar_serial.h"
+#include "nexstar_aux.h"
 
 
-uint8_t calcCRC(nexstar_message *msg)
+void uint32To24bits(uint32_t in, char *out) {
+    uint32_t tmp = in;
+    for (int i=0; i<3; i++) {
+        out[2-i] = tmp & 0xff;
+        tmp = tmp >> 8;
+    }
+}
+
+
+uint32_t uint32From24bits(char *data) {
+    uint32_t out = 0;
+    for (int i=0; i<3; i++) {
+        out = (out << 8) | data[i];
+    }
+    return out;
+}
+
+
+uint8_t calcCRC(NexStarMessage *msg)
 {
     int result = 0;
     char *data = (char*)msg;
@@ -22,24 +40,24 @@ uint8_t calcCRC(nexstar_message *msg)
 }
 
 
-NexStartSerial::NexStartSerial(int rx, int tx, int select)
+NexStarAux::NexStarAux(int rx, int tx, int select)
 {
     serial = new SoftwareSerial(rx, tx);
     select_pin = select;
 }
 
 // Initialize pins and setup serial port
-void NexStartSerial::begin()
+void NexStarAux::begin()
 {
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(select_pin, INPUT);
     serial->begin(AUX_BAUDRATE);
 }
 
-// Fill nexstar_message struct
+// Fill NexStarMessage struct
 // data: payload data
 // size: size of payload data
-int NexStartSerial::newMessage(nexstar_message *msg, uint8_t dest, uint8_t id,
+int NexStarAux::newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
                                uint8_t size, char* data)
 {
     if (size > MAX_PAYLOAD_SIZE) {
@@ -56,10 +74,10 @@ int NexStartSerial::newMessage(nexstar_message *msg, uint8_t dest, uint8_t id,
 }
 
 // Send a message and receive its response
-int NexStartSerial::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
-                                char* data, nexstar_message *resp)
+int NexStarAux::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
+        char* data, NexStarMessage *resp)
 {
-    nexstar_message msg;
+    NexStarMessage msg;
     char *bytes = (char*)(&msg);
 
     int ret = newMessage(&msg, dest, id, size, data);
@@ -103,11 +121,11 @@ int NexStartSerial::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
     unsigned int pos = 0;
     while (serial->available()) {
         bytes[pos++] = serial->read();
-        if (pos >= sizeof(nexstar_message)) {
+        if (pos >= sizeof(NexStarMessage)) {
             return ERR_BAD_SIZE;
         }
     }
-    if (pos <= sizeof(nexstar_header) + 1) {
+    if (pos <= sizeof(NexStarHeader) + 1) {
         return ERR_BAD_SIZE;
     }
     resp->crc = bytes[resp->header.length + 2];
@@ -115,4 +133,66 @@ int NexStartSerial::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
         return ERR_CRC;
     }
     return 0;
+}
+
+int NexStarAux::setPosition(uint8_t dest, uint32_t pos)
+{
+    NexStarMessage resp;
+    char payload[3];
+    uint32To24bits(pos, payload);
+    return sendMessage(dest, 0x04, 3, payload, &resp);
+}
+
+int NexStarAux::getPosition(uint8_t dest, uint32_t *pos)
+{
+    NexStarMessage resp;
+    int ret = sendMessage(dest, 0x01, 0, NULL, &resp);
+    *pos = uint32From24bits(resp.payload);
+    return ret;
+}
+
+int NexStarAux::gotoPosition(uint8_t dest, bool slow, uint32_t pos)
+{
+    NexStarMessage resp;
+    char payload[3];
+    uint32To24bits(pos, payload);
+
+    if (slow) {
+        return sendMessage(dest, 0x17, 3, payload, &resp);
+    }
+    return sendMessage(dest, 0x02, 3, payload, &resp);
+}
+
+int NexStarAux::move(uint8_t dest, bool dir, uint8_t rate)
+{
+    NexStarMessage resp;
+    uint8_t payload[1] = { rate };
+
+    if (dir) {
+        return sendMessage(dest, 0x24, 1, (char *)payload, &resp);
+    }
+    return sendMessage(dest, 0x025, 1, (char *)payload, &resp);
+}
+
+int NexStarAux::slewDone(uint8_t dest, bool *done)
+{
+    NexStarMessage resp;
+    int ret = sendMessage(dest, 0x13, 0, NULL, &resp);
+    *done = (bool)resp.payload[0];
+    return ret;
+}
+
+int NexStarAux::setApproach(uint8_t dest, bool dir)
+{
+    NexStarMessage resp;
+    char payload[1] = { dir };
+    return sendMessage(dest, 0xfd, 1, payload, &resp);
+}
+
+int NexStarAux::getApproach(uint8_t dest, bool *dir)
+{
+    NexStarMessage resp;
+    int ret = sendMessage(dest, 0xfc, 0, NULL, &resp);
+    *dir = (bool)resp.payload[0];
+    return ret;
 }
