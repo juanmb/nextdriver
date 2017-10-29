@@ -22,6 +22,9 @@
 #define ERR_BAD_HDR -4
 #define ERR_CRC -5
 
+#define POS_GUIDERATE 1
+#define NEG_GUIDERATE 0
+
 #define GUIDERATE_SIDEREAL 0xffff
 #define GUIDERATE_SOLAR 0xfffe
 #define GUIDERATE_LUNAR 0xfffd
@@ -76,7 +79,7 @@ public:
     int move(uint8_t dest, bool dir, uint8_t rate);
     int slewDone(uint8_t dest, bool *done);
 
-    int setGuiderate(uint8_t dest, bool dir, uint32_t rate);
+    int setGuiderate(uint8_t dest, bool dir, bool custom_rate, uint32_t rate);
     int setAutoGuiderate(uint8_t dest, uint8_t rate);
     int getAutoGuiderate(uint8_t dest, uint8_t *rate);
 

@@ -4,8 +4,8 @@
 #include "nexstar_aux.h"
 
 
-#define VERSION_MAJOR 3
-#define VERSION_MINOR 1
+#define VERSION_MAJOR 4
+#define VERSION_MINOR 2
 #define MOUNT_MODEL 10  // GT
 #define BAUDRATE 9600
 
@@ -16,6 +16,8 @@
 
 SerialCommand sCmd;
 NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
+
+uint8_t tracking_mode = 0;
 
 
 void cmdGetEqCoords(char *cmd)
@@ -58,8 +60,8 @@ void cmdGotoEqCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "R%4lx,%4lx", &ra_pos, &dec_pos);
-    scope.gotoPosition(DEV_RA, false, ra_pos);
-    scope.gotoPosition(DEV_DEC, false, dec_pos);
+    scope.gotoPosition(DEV_RA, true, ra_pos);
+    scope.gotoPosition(DEV_DEC, true, dec_pos);
     Serial.write('#');
 }
 
@@ -67,8 +69,8 @@ void cmdGotoEqPreciseCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "r%8lx,%8lx", &ra_pos, &dec_pos);
-    scope.gotoPosition(DEV_RA, false, ra_pos);
-    scope.gotoPosition(DEV_DEC, false, dec_pos);
+    scope.gotoPosition(DEV_RA, true, ra_pos);
+    scope.gotoPosition(DEV_DEC, true, dec_pos);
     Serial.write('#');
 }
 
@@ -115,6 +117,35 @@ void cmdSyncEqPreciseCoords(char *cmd)
     sscanf(cmd, "s%8lx,%8lx", &ra_pos, &dec_pos);
     scope.setPosition(DEV_RA, ra_pos >> 8);
     scope.setPosition(DEV_DEC, dec_pos >> 8);
+    Serial.write('#');
+}
+
+void cmdGetTrackingMode(char *cmd)
+{
+    Serial.write(tracking_mode);
+    Serial.write('#');
+}
+
+void cmdSetTrackingMode(char *cmd)
+{
+    tracking_mode = cmd[1];
+    scope.setGuiderate(DEV_RA, 0, 1, 0);    // stop RA motor
+    scope.setGuiderate(DEV_DEC, 0, 1, 0);   // stop DEC motor
+
+    switch(cmd[1]) {
+        case 1:
+            // Alt/az
+            // TODO
+            break;
+        case 2:
+            // EQ North
+            scope.setGuiderate(DEV_RA, POS_GUIDERATE, 0, GUIDERATE_SIDEREAL);
+            break;
+        case 3:
+            // EQ South
+            scope.setGuiderate(DEV_RA, NEG_GUIDERATE, 0, GUIDERATE_SIDEREAL);
+            break;
+    }
     Serial.write('#');
 }
 
@@ -204,6 +235,9 @@ void setup()
 
     sCmd.addCommand('S', 10, cmdSyncEqCoords);
     sCmd.addCommand('s', 18, cmdSyncEqPreciseCoords);
+
+    sCmd.addCommand('t', 1, cmdGetTrackingMode);
+    sCmd.addCommand('T', 2, cmdSetTrackingMode);
 
     sCmd.addCommand('w', 1, cmdGetLocation);
     sCmd.addCommand('W', 9, cmdSetLocation);

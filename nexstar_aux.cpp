@@ -14,15 +14,17 @@ void uint32To24bits(uint32_t in, char *out) {
     uint32_t tmp = in;
     for (int i=0; i<3; i++) {
         out[2-i] = tmp & 0xff;
-        tmp = tmp >> 8;
+        tmp >>= 8;
     }
 }
 
 
 uint32_t uint32From24bits(char *data) {
     uint32_t out = 0;
+
     for (int i=0; i<3; i++) {
-        out = (out << 8) | data[i];
+        out <<= 8;
+        out |= data[i] & 0xff;
     }
     return out;
 }
@@ -180,6 +182,18 @@ int NexStarAux::slewDone(uint8_t dest, bool *done)
     int ret = sendMessage(dest, 0x13, 0, NULL, &resp);
     *done = (bool)resp.payload[0];
     return ret;
+}
+
+int NexStarAux::setGuiderate(uint8_t dest, bool dir, bool custom_rate, uint32_t rate)
+{
+    NexStarMessage resp;
+
+    char payload[3];
+    uint32To24bits(rate << 8, payload);
+
+    char msgId = dir ? 0x06 : 0x07;
+    char msgSize = custom_rate ? 3 : 2;
+    return sendMessage(dest, msgId, msgSize, payload, &resp);
 }
 
 int NexStarAux::setApproach(uint8_t dest, bool dir)

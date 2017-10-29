@@ -87,6 +87,13 @@ class NexStarComm(object):
         ret = self.send_packet('L', 2)
         return ret[0] != '\0'
 
+    def get_tracking_mode(self):
+        ret = self.send_packet('t', 2)
+        return ord(ret[0])
+
+    def set_tracking_mode(self, mode=0):
+        self.send_packet('T%c' % mode, 1)
+
 
 if __name__ == '__main__':
     nex = NexStarComm('/dev/ttyACM0', True)
@@ -96,18 +103,26 @@ if __name__ == '__main__':
     # print "RA version:\t", nex.get_device_version(RA_DEV)
     # print "Dec version:\t", nex.get_device_version(DEC_DEV)
 
+    nex.set_tracking_mode(2)
+    print nex.get_tracking_mode()
+
     # nex.set_eq_coords(0xfedc, 0x5678)
     # nex.set_eq_coords(0xf2345600, 0xf3456700, precise=True)
     # print nex.get_eq_coords(precise=True)
     # print nex.get_eq_coords(precise=False)
 
-    #nex.set_eq_coords(0x0000, 0x0000)
-    nex.goto_eq_coords(0xff00, 0x0000)
+    # nex.set_eq_coords(0x0000, 0x0000)
 
-    for i in range(10):
-        #print nex.is_slewing()
-        print nex.get_eq_coords(precise=True)
-        time.sleep(1)
+    # nex.set_eq_coords(0x0000, 0x0000)
+    # time.sleep(1)
+    # print nex.get_eq_coords(precise=False)
+
+    # nex.goto_eq_coords(0x1000, 0x0000, precise=False)
+
+    # for i in range(10):
+        # time.sleep(1)
+        # print nex.get_eq_coords(precise=False)
+
 
     # nex.cancel_goto()
 
