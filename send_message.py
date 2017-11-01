@@ -66,26 +66,30 @@ class NexStarComm(object):
         else:
             ret = self.send_packet('E', 10)
 
-        return [int(a, 16) for a in ret.strip('#').split(',')]
+        ra, dec = [int(a, 16) for a in ret.strip('#').split(',')]
+        factor = 360.0/0xffffffff if precise else 360.0/0xffff
+        return ra*factor, dec*factor
 
     def set_eq_coords(self, ra, dec, precise=False):
+        factor = 0xffffffff/360.0 if precise else 0xffff/360.0
         if precise:
-            self.send_packet('s%08X,%08X' % (ra, dec), 1)
+            self.send_packet('s%08X,%08X' % (ra*factor, dec*factor), 1)
         else:
-            self.send_packet('S%04X,%04X' % (ra, dec), 1)
+            self.send_packet('S%04X,%04X' % (ra*factor, dec*factor), 1)
 
     def goto_eq_coords(self, ra, dec, precise=False):
+        factor = 0xffffffff/360.0 if precise else 0xffff/360.0
         if precise:
-            self.send_packet('r%08X,%08X' % (ra, dec), 1)
+            self.send_packet('r%08X,%08X' % (ra*factor, dec*factor), 1)
         else:
-            self.send_packet('R%04X,%04X' % (ra, dec), 1)
+            self.send_packet('R%04X,%04X' % (ra*factor, dec*factor), 1)
 
     def cancel_goto(self):
         self.send_packet('M', 1)
 
     def is_slewing(self):
         ret = self.send_packet('L', 2)
-        return ret[0] != '\0'
+        return ret[0] != '0'
 
     def get_tracking_mode(self):
         ret = self.send_packet('t', 2)
@@ -103,33 +107,16 @@ if __name__ == '__main__':
     # print "RA version:\t", nex.get_device_version(RA_DEV)
     # print "Dec version:\t", nex.get_device_version(DEC_DEV)
 
-    nex.set_tracking_mode(2)
-    print nex.get_tracking_mode()
+    # nex.set_tracking_mode(0)
+    # print "Tracking mode:", nex.get_tracking_mode()
 
-    # nex.set_eq_coords(0xfedc, 0x5678)
-    # nex.set_eq_coords(0xf2345600, 0xf3456700, precise=True)
-    # print nex.get_eq_coords(precise=True)
-    # print nex.get_eq_coords(precise=False)
+    # set coords (in deg)
+    nex.set_eq_coords(0, 0)
 
-    # nex.set_eq_coords(0x0000, 0x0000)
-
-    # nex.set_eq_coords(0x0000, 0x0000)
-    # time.sleep(1)
-    # print nex.get_eq_coords(precise=False)
-
-    # nex.goto_eq_coords(0x1000, 0x0000, precise=False)
-
-    # for i in range(10):
-        # time.sleep(1)
-        # print nex.get_eq_coords(precise=False)
-
-
-    # nex.cancel_goto()
-
-    # time.sleep(0.1)
-    # nex.cancel_goto()
-
-    # nex.slew_ra(8, 0)
-    # time.sleep(1)
-    # nex.slew_ra(0, 0)
-
+    # goto coords (in deg)
+    nex.goto_eq_coords(10, 0, precise=True)
+    while nex.is_slewing():
+        time.sleep(1)
+        print nex.get_eq_coords(precise=True)
+    time.sleep(1)
+    print nex.get_eq_coords(precise=True)

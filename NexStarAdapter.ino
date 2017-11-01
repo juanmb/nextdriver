@@ -60,8 +60,8 @@ void cmdGotoEqCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "R%4lx,%4lx", &ra_pos, &dec_pos);
-    scope.gotoPosition(DEV_RA, true, ra_pos);
-    scope.gotoPosition(DEV_DEC, true, dec_pos);
+    scope.gotoPosition(DEV_RA, false, ra_pos << 8);
+    scope.gotoPosition(DEV_DEC, false, dec_pos << 8);
     Serial.write('#');
 }
 
@@ -69,8 +69,8 @@ void cmdGotoEqPreciseCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "r%8lx,%8lx", &ra_pos, &dec_pos);
-    scope.gotoPosition(DEV_RA, true, ra_pos);
-    scope.gotoPosition(DEV_DEC, true, dec_pos);
+    scope.gotoPosition(DEV_RA, true, ra_pos >> 8);
+    scope.gotoPosition(DEV_DEC, true, dec_pos >> 8);
     Serial.write('#');
 }
 
@@ -170,7 +170,15 @@ void cmdSetLocation(char *cmd)
 void cmdGetTime(char *cmd)
 {
     //TODO
-    Serial.write("\0\0\0\0\0\0\0\0s#");
+    Serial.write(17);   // hours
+    Serial.write(30);   // minutes
+    Serial.write(10);   // seconds
+    Serial.write(4);    // month
+    Serial.write(1);    // day
+    Serial.write(15);   // year
+    Serial.write(3);    // offset from GMT
+    Serial.write(0);    // Daylight saving
+    Serial.write("#");
 }
 
 void cmdSetTime(char *cmd)
