@@ -13,11 +13,21 @@
 #define AUX_RX 6
 #define AUX_TX 7
 
+// milliseconds to position factor
+#define T_FACTOR (0x1000000/8.616e7)
+
 
 SerialCommand sCmd;
 NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
 
 uint8_t tracking_mode = 0;
+uint32_t t_last = 0;
+
+
+// Obtain the difference in RA from the motor position due to Earth rotation
+inline uint32_t getRADiff() {
+    return (int32_t)(T_FACTOR*(millis() - t_last));
+}
 
 
 void cmdGetEqCoords(char *cmd)
@@ -25,6 +35,8 @@ void cmdGetEqCoords(char *cmd)
     uint32_t ra_pos, dec_pos;
     scope.getPosition(DEV_RA, &ra_pos);
     scope.getPosition(DEV_DEC, &dec_pos);
+    ra_pos -= getRADiff();
+
     ra_pos = (ra_pos >> 8) & 0xffff;
     dec_pos = (dec_pos >> 8) & 0xffff;
 
@@ -38,6 +50,7 @@ void cmdGetEqPreciseCoords(char *cmd)
     uint32_t ra_pos, dec_pos;
     scope.getPosition(DEV_RA, &ra_pos);
     scope.getPosition(DEV_DEC, &dec_pos);
+    ra_pos -= getRADiff();
 
     char tmp[19];
     sprintf(tmp, "%08lX,%08lX#", ra_pos << 8, dec_pos << 8);
@@ -56,12 +69,26 @@ void cmdGetAzPreciseCoords(char *cmd)
     cmdGetEqPreciseCoords(cmd);
 }
 
+// Return true if a given position is close to the current axis position
+// (approx. 11 degrees)
+bool is_close(uint32_t pos, uint8_t axis)
+{
+    uint32_t curr, diff;
+
+    scope.getPosition(axis, &curr);
+    diff = (pos > curr) ? (pos - curr) : (curr - pos);
+    return diff < 0x080000;
+}
+
 void cmdGotoEqCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "R%4lx,%4lx", &ra_pos, &dec_pos);
-    scope.gotoPosition(DEV_RA, false, ra_pos << 8);
-    scope.gotoPosition(DEV_DEC, false, dec_pos << 8);
+    ra_pos <<= 8;
+    dec_pos <<= 8;
+
+    scope.gotoPosition(DEV_RA, is_close(ra_pos, DEV_RA), ra_pos);
+    scope.gotoPosition(DEV_DEC, is_close(dec_pos, DEV_DEC), dec_pos);
     Serial.write('#');
 }
 
@@ -69,8 +96,11 @@ void cmdGotoEqPreciseCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "r%8lx,%8lx", &ra_pos, &dec_pos);
-    scope.gotoPosition(DEV_RA, true, ra_pos >> 8);
-    scope.gotoPosition(DEV_DEC, true, dec_pos >> 8);
+    ra_pos >>= 8;
+    dec_pos >>= 8;
+
+    scope.gotoPosition(DEV_RA, is_close(ra_pos, DEV_RA), ra_pos);
+    scope.gotoPosition(DEV_DEC, is_close(dec_pos, DEV_DEC), dec_pos);
     Serial.write('#');
 }
 
@@ -109,6 +139,7 @@ void cmdSyncEqCoords(char *cmd)
     scope.setPosition(DEV_RA, ra_pos << 8);
     scope.setPosition(DEV_DEC, dec_pos << 8);
     Serial.write('#');
+    t_last = millis();
 }
 
 void cmdSyncEqPreciseCoords(char *cmd)
@@ -118,6 +149,7 @@ void cmdSyncEqPreciseCoords(char *cmd)
     scope.setPosition(DEV_RA, ra_pos >> 8);
     scope.setPosition(DEV_DEC, dec_pos >> 8);
     Serial.write('#');
+    t_last = millis();
 }
 
 void cmdGetTrackingMode(char *cmd)
@@ -129,23 +161,18 @@ void cmdGetTrackingMode(char *cmd)
 void cmdSetTrackingMode(char *cmd)
 {
     tracking_mode = cmd[1];
-    scope.setGuiderate(DEV_RA, 0, 1, 0);    // stop RA motor
-    scope.setGuiderate(DEV_DEC, 0, 1, 0);   // stop DEC motor
+    scope.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
+    scope.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
 
-    switch(cmd[1]) {
-        case 1:
-            // Alt/az
-            // TODO
+    switch(tracking_mode) {
+        case TRACKING_EQ_NORTH:
+            scope.setGuiderate(DEV_RA, GUIDERATE_POS, 0, GUIDERATE_SIDEREAL);
             break;
-        case 2:
-            // EQ North
-            scope.setGuiderate(DEV_RA, POS_GUIDERATE, 0, GUIDERATE_SIDEREAL);
-            break;
-        case 3:
-            // EQ South
-            scope.setGuiderate(DEV_RA, NEG_GUIDERATE, 0, GUIDERATE_SIDEREAL);
+        case TRACKING_EQ_SOUTH:
+            scope.setGuiderate(DEV_RA, GUIDERATE_NEG, 0, GUIDERATE_SIDEREAL);
             break;
     }
+
     Serial.write('#');
 }
 

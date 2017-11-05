@@ -22,8 +22,13 @@
 #define ERR_BAD_HDR -4
 #define ERR_CRC -5
 
-#define POS_GUIDERATE 1
-#define NEG_GUIDERATE 0
+#define TRACKING_NONE 0
+#define TRACKING_ALTAZ 1
+#define TRACKING_EQ_NORTH 2
+#define TRACKING_EQ_SOUTH 3
+
+#define GUIDERATE_NEG 0
+#define GUIDERATE_POS 1
 
 #define GUIDERATE_SIDEREAL 0xffff
 #define GUIDERATE_SOLAR 0xfffe
