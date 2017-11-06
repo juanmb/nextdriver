@@ -1,3 +1,11 @@
+/******************************************************************
+    Author:     Juan Menendez Blanco    <juanmb@gmail.com>
+
+    This code is part of the NexStarAdapter project:
+        https://github.com/juanmb/NexStarAdapter
+
+********************************************************************/
+
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 #include "serial_command.h"
@@ -14,19 +22,21 @@
 #define AUX_TX 7
 
 // milliseconds to position factor
-#define T_FACTOR (0x1000000/8.616e7)
+#define T_FACTOR (0xffffffff/8.616e7)
+
+#define reverse(a) (0xffffffff - (a))
 
 
 SerialCommand sCmd;
 NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
 
 uint8_t tracking_mode = 0;
-uint32_t t_last = 0;
+uint32_t t_sync = 0;
 
 
 // Obtain the difference in RA from the motor position due to Earth rotation
-inline uint32_t getRADiff() {
-    return (int32_t)(T_FACTOR*(millis() - t_last));
+static uint32_t getRADiff() {
+    return T_FACTOR*(millis() - t_sync);
 }
 
 
@@ -35,10 +45,10 @@ void cmdGetEqCoords(char *cmd)
     uint32_t ra_pos, dec_pos;
     scope.getPosition(DEV_RA, &ra_pos);
     scope.getPosition(DEV_DEC, &dec_pos);
-    ra_pos -= getRADiff();
+    ra_pos = reverse(ra_pos) + getRADiff();
 
-    ra_pos = (ra_pos >> 8) & 0xffff;
-    dec_pos = (dec_pos >> 8) & 0xffff;
+    ra_pos = (ra_pos >> 16) & 0xffff;
+    dec_pos = (dec_pos >> 16) & 0xffff;
 
     char tmp[11];
     sprintf(tmp, "%04lX,%04lX#", ra_pos, dec_pos);
@@ -50,10 +60,10 @@ void cmdGetEqPreciseCoords(char *cmd)
     uint32_t ra_pos, dec_pos;
     scope.getPosition(DEV_RA, &ra_pos);
     scope.getPosition(DEV_DEC, &dec_pos);
-    ra_pos -= getRADiff();
+    ra_pos = reverse(ra_pos) + getRADiff();
 
     char tmp[19];
-    sprintf(tmp, "%08lX,%08lX#", ra_pos << 8, dec_pos << 8);
+    sprintf(tmp, "%08lX,%08lX#", ra_pos, dec_pos);
     Serial.write(tmp);
 }
 
@@ -71,24 +81,24 @@ void cmdGetAzPreciseCoords(char *cmd)
 
 // Return true if a given position is close to the current axis position
 // (approx. 11 degrees)
-bool is_close(uint32_t pos, uint8_t axis)
+bool isClose(uint32_t pos, uint8_t axis)
 {
     uint32_t curr, diff;
 
     scope.getPosition(axis, &curr);
     diff = (pos > curr) ? (pos - curr) : (curr - pos);
-    return diff < 0x080000;
+    return diff < 0x08000000;
 }
 
 void cmdGotoEqCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "R%4lx,%4lx", &ra_pos, &dec_pos);
-    ra_pos <<= 8;
-    dec_pos <<= 8;
+    ra_pos = reverse(ra_pos << 16) + getRADiff();
+    dec_pos <<= 16;
 
-    scope.gotoPosition(DEV_RA, is_close(ra_pos, DEV_RA), ra_pos);
-    scope.gotoPosition(DEV_DEC, is_close(dec_pos, DEV_DEC), dec_pos);
+    scope.gotoPosition(DEV_RA, isClose(ra_pos, DEV_RA), ra_pos);
+    scope.gotoPosition(DEV_DEC, isClose(dec_pos, DEV_DEC), dec_pos);
     Serial.write('#');
 }
 
@@ -96,11 +106,10 @@ void cmdGotoEqPreciseCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "r%8lx,%8lx", &ra_pos, &dec_pos);
-    ra_pos >>= 8;
-    dec_pos >>= 8;
+    ra_pos = reverse(ra_pos) + getRADiff();
 
-    scope.gotoPosition(DEV_RA, is_close(ra_pos, DEV_RA), ra_pos);
-    scope.gotoPosition(DEV_DEC, is_close(dec_pos, DEV_DEC), dec_pos);
+    scope.gotoPosition(DEV_RA, isClose(ra_pos, DEV_RA), ra_pos);
+    scope.gotoPosition(DEV_DEC, isClose(dec_pos, DEV_DEC), dec_pos);
     Serial.write('#');
 }
 
@@ -136,20 +145,20 @@ void cmdSyncEqCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "S%4lx,%4lx", &ra_pos, &dec_pos);
-    scope.setPosition(DEV_RA, ra_pos << 8);
-    scope.setPosition(DEV_DEC, dec_pos << 8);
+    scope.setPosition(DEV_RA, reverse(ra_pos << 16));
+    scope.setPosition(DEV_DEC, dec_pos << 16);
     Serial.write('#');
-    t_last = millis();
+    t_sync = millis();
 }
 
 void cmdSyncEqPreciseCoords(char *cmd)
 {
     uint32_t ra_pos, dec_pos;
     sscanf(cmd, "s%8lx,%8lx", &ra_pos, &dec_pos);
-    scope.setPosition(DEV_RA, ra_pos >> 8);
-    scope.setPosition(DEV_DEC, dec_pos >> 8);
+    scope.setPosition(DEV_RA, reverse(ra_pos));
+    scope.setPosition(DEV_DEC, dec_pos);
     Serial.write('#');
-    t_last = millis();
+    t_sync = millis();
 }
 
 void cmdGetTrackingMode(char *cmd)

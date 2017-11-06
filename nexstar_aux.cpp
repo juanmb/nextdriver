@@ -4,27 +4,29 @@
     This code is part of the NexStarAdapter project:
         https://github.com/juanmb/NexStarAdapter
 
-*******************************************************************************/
+*******************************************************************/
 
 #include <Arduino.h>
 #include "nexstar_aux.h"
 
 
+// The number 0x12345678 will be converted into {0x12, 0x34, 0x56}
 void uint32To24bits(uint32_t in, char *out) {
     uint32_t tmp = in;
     for (int i=0; i<3; i++) {
-        out[2-i] = tmp & 0xff;
         tmp >>= 8;
+        out[2-i] = tmp & 0xff;
     }
 }
 
 
+// The char array {0x12, 0x34, 0x56} will be converted into 0x12345600
 uint32_t uint32From24bits(char *data) {
     uint32_t out = 0;
 
     for (int i=0; i<3; i++) {
-        out <<= 8;
         out |= data[i] & 0xff;
+        out <<= 8;
     }
     return out;
 }
@@ -189,7 +191,7 @@ int NexStarAux::setGuiderate(uint8_t dest, bool dir, bool custom_rate, uint32_t 
     NexStarMessage resp;
 
     char payload[3];
-    uint32To24bits(rate << 8, payload);
+    uint32To24bits(rate << 16, payload);
 
     char msgId = dir ? 0x06 : 0x07;
     char msgSize = custom_rate ? 3 : 2;

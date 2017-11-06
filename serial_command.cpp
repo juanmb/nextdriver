@@ -4,7 +4,7 @@
     This code is part of the NexStarAdapter project:
         https://github.com/juanmb/NexStarAdapter
 
-*******************************************************************************/
+*******************************************************************/
 
 #include <Arduino.h>
 #include "serial_command.h"

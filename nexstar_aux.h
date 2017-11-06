@@ -4,7 +4,7 @@
     This code is part of the NexStarAdapter project:
         https://github.com/juanmb/NexStarAdapter
 
-*******************************************************************************/
+*******************************************************************/
 
 #ifndef _NexStarAux_h_
 #define _NexStarAux_h_

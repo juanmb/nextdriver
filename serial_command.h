@@ -4,7 +4,7 @@
     This code is part of the NexStarAdapter project:
         https://github.com/juanmb/NexStarAdapter
 
-*******************************************************************************/
+*******************************************************************/
 
 #ifndef _SerialCommand_h_
 #define _SerialCommand_h_
