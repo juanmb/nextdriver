@@ -20,6 +20,8 @@
 #define AUX_SELECT 5
 #define AUX_RX 6
 #define AUX_TX 7
+#define RA_POT_PIN A6
+#define DEC_POT_PIN A7
 
 // milliseconds to position factor
 #define T_FACTOR (0xffffffff/8.616e7)
@@ -262,13 +264,25 @@ void cmdEcho(char *cmd)
     Serial.write('#');
 }
 
+// Read the absolute position of the two axes using two potentiometers.
+// The returned position is the raw 10-bits value reading from the ADC.
+void cmdGetAbsPosition(char *cmd)
+{
+    int axis1_pos = analogRead(RA_POT_PIN);
+    int axis2_pos = analogRead(DEC_POT_PIN);
+
+    char tmp[11];
+    sprintf(tmp, "%04X,%04X#", axis1_pos, axis2_pos);
+    Serial.write(tmp);
+}
+
 void setup()
 {
     // Map serial commands to functions
     sCmd.addCommand('E', 1, cmdGetEqCoords);
     sCmd.addCommand('e', 1, cmdGetEqPreciseCoords);
     sCmd.addCommand('Z', 1, cmdGetAzCoords);
-    sCmd.addCommand('a', 1, cmdGetAzPreciseCoords);
+    sCmd.addCommand('z', 1, cmdGetAzPreciseCoords);
 
     sCmd.addCommand('R', 10, cmdGotoEqCoords);
     sCmd.addCommand('r', 18, cmdGotoEqPreciseCoords);
@@ -280,18 +294,21 @@ void setup()
     sCmd.addCommand('S', 10, cmdSyncEqCoords);
     sCmd.addCommand('s', 18, cmdSyncEqPreciseCoords);
 
-    sCmd.addCommand('t', 1, cmdGetTrackingMode);
     sCmd.addCommand('T', 2, cmdSetTrackingMode);
+    sCmd.addCommand('t', 1, cmdGetTrackingMode);
 
-    sCmd.addCommand('w', 1, cmdGetLocation);
     sCmd.addCommand('W', 9, cmdSetLocation);
-    sCmd.addCommand('h', 1, cmdGetTime);
+    sCmd.addCommand('w', 1, cmdGetLocation);
     sCmd.addCommand('H', 9, cmdSetTime);
+    sCmd.addCommand('h', 1, cmdGetTime);
 
     sCmd.addCommand('P', 8, cmdPassThrough);
     sCmd.addCommand('V', 1, cmdGetVersion);
     sCmd.addCommand('m', 1, cmdGetModel);
     sCmd.addCommand('K', 2, cmdEcho);
+
+    // custom command
+    sCmd.addCommand('U', 1, cmdGetAbsPosition);
 
     //sCmd.addCommand('J', 1, cmdAlignmentComplete);
     //sCmd.addCommand('x', 1, cmdHibernate);
