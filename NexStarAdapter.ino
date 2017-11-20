@@ -15,6 +15,7 @@
 #define VERSION_MAJOR 4
 #define VERSION_MINOR 2
 #define MOUNT_MODEL 10  // GT
+#define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
 
 #define AUX_SELECT 5
@@ -252,6 +253,12 @@ void cmdGetVersion(char *cmd)
     Serial.write('#');
 }
 
+void cmdGetVariant(char *cmd)
+{
+    Serial.write(CONTROLLER_VARIANT);
+    Serial.write('#');
+}
+
 void cmdGetModel(char *cmd)
 {
     Serial.write(MOUNT_MODEL);
@@ -304,6 +311,7 @@ void setup()
 
     sCmd.addCommand('P', 8, cmdPassThrough);
     sCmd.addCommand('V', 1, cmdGetVersion);
+    sCmd.addCommand('v', 1, cmdGetVariant);
     sCmd.addCommand('m', 1, cmdGetModel);
     sCmd.addCommand('K', 2, cmdEcho);
 
