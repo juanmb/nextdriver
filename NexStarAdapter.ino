@@ -6,14 +6,15 @@
 
 ********************************************************************/
 
-#include <EEPROM.h>
+//#include <EEPROM.h>
 #include <SoftwareSerial.h>
 #include "serial_command.h"
 #include "nexstar_aux.h"
+#include "AstroLib.h"
 
 
 #define VERSION_MAJOR 4
-#define VERSION_MINOR 2
+#define VERSION_MINOR 21
 #define MOUNT_MODEL 10  // GT
 #define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
@@ -24,108 +25,194 @@
 #define RA_POT_PIN A6
 #define DEC_POT_PIN A7
 
-// milliseconds to position factor
-#define T_FACTOR (0xffffffff/8.616e7)
+enum Status {
+    ST_IDLE,
+    ST_GOING_FAST,
+    ST_GOING_SLOW,
+};
 
-#define reverse(a) (0xffffffff - (a))
-
-
+Status scopeStatus = ST_IDLE;
 SerialCommand sCmd;
 NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
 
+double jdate = 0.0;    // Julian date refered to J2000
+Location location = {0};
 uint8_t tracking_mode = 0;
+uint32_t t_timeset = 0;
 uint32_t t_sync = 0;
 
 
-// Obtain the difference in RA from the motor position due to Earth rotation
-static uint32_t getRADiff() {
-    return T_FACTOR*(millis() - t_sync);
+// Convert nexstar angle format to radians
+double nex2rad(uint16_t angle)
+{
+    return 2*M_PI*((double)angle / 0x10000);
 }
 
+// Convert nexstar precise angle format to radians
+double pnex2rad(uint32_t angle)
+{
+    return 2*M_PI*((double)angle / 0x100000000);
+}
+
+// Convert radians to nexstar angle format
+uint16_t rad2nex(double rad)
+{
+    return (uint16_t)(rad * 0x10000 / (2*M_PI));
+}
+
+// Convert radians to nexstar precise angle format
+uint32_t rad2pnex(double rad)
+{
+    return (uint32_t)(rad * 0x100000000 / (2*M_PI));
+}
+
+// Obtain the difference in RA from the motor position due to Earth rotation
+static double getRADiff() {
+    return 2*M_PI/8.616e7*(millis() - t_sync);
+}
+
+void getEqCoords(EqCoords *eq)
+{
+    uint32_t ra_pos, dec_pos;
+    scope.getPosition(DEV_RA, &ra_pos);
+    scope.getPosition(DEV_DEC, &dec_pos);
+
+    eq->ra = 2*M_PI - pnex2rad(ra_pos) + getRADiff();
+    eq->dec = pnex2rad(dec_pos);
+}
+
+void setEqCoords(EqCoords eq)
+{
+    scope.setPosition(DEV_RA, rad2pnex(2*M_PI - eq.ra));
+    scope.setPosition(DEV_DEC, rad2pnex(eq.dec));
+    t_sync = millis();
+}
+
+void gotoEqCoords(EqCoords eq)
+{
+    uint32_t ra_pos = rad2pnex(2*M_PI - eq.ra + getRADiff());
+    uint32_t dec_pos = rad2pnex(eq.dec);
+
+    EqCoords curr_eq;
+    getEqCoords(&curr_eq);
+
+    // perform a 'slow slew' if the movement is less than 10 degrees
+    bool slow_ra = fabs(curr_eq.ra - eq.ra) < M_PI/18;
+    bool slow_dec = fabs(curr_eq.dec - eq.dec) < M_PI/18;
+
+    scope.gotoPosition(DEV_RA, slow_ra, ra_pos);
+    scope.gotoPosition(DEV_DEC, slow_dec, dec_pos);
+}
+
+void getAzCoords(HorizCoords *hor)
+{
+    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
+    double lst = getLST(jd, location);
+
+    EqCoords eq;
+    getEqCoords(&eq);
+
+    eqToHoriz(lst, location, eq, hor);
+}
+
+void gotoAzCoords(HorizCoords hor)
+{
+    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
+    double lst = getLST(jd, location);
+
+    EqCoords eq;
+    horizToEq(lst, location, hor, &eq);
+    gotoEqCoords(eq);
+}
 
 void cmdGetEqCoords(char *cmd)
 {
-    uint32_t ra_pos, dec_pos;
-    scope.getPosition(DEV_RA, &ra_pos);
-    scope.getPosition(DEV_DEC, &dec_pos);
-    ra_pos = reverse(ra_pos) + getRADiff();
-
-    ra_pos = (ra_pos >> 16) & 0xffff;
-    dec_pos = (dec_pos >> 16) & 0xffff;
-
-    char tmp[11];
-    sprintf(tmp, "%04lX,%04lX#", ra_pos, dec_pos);
-    Serial.write(tmp);
-}
-
-void cmdGetEqPreciseCoords(char *cmd)
-{
-    uint32_t ra_pos, dec_pos;
-    scope.getPosition(DEV_RA, &ra_pos);
-    scope.getPosition(DEV_DEC, &dec_pos);
-    ra_pos = reverse(ra_pos) + getRADiff();
+    EqCoords eq;
+    getEqCoords(&eq);
 
     char tmp[19];
-    sprintf(tmp, "%08lX,%08lX#", ra_pos, dec_pos);
+
+    if (cmd[0] == 'E')
+        sprintf(tmp, "%04X,%04X#", rad2nex(eq.ra), rad2nex(eq.dec));
+    else
+        sprintf(tmp, "%08lX,%08lX#", rad2pnex(eq.ra), rad2pnex(eq.dec));
+
     Serial.write(tmp);
 }
 
 void cmdGetAzCoords(char *cmd)
 {
-    //TODO
-    cmdGetEqCoords(cmd);
+    HorizCoords hor;
+    getAzCoords(&hor);
+
+    char tmp[19];
+
+    if (cmd[0] == 'Z')
+        sprintf(tmp, "%04X,%04X#", rad2nex(hor.az), rad2nex(hor.alt));
+    else
+        sprintf(tmp, "%08lX,%08lX#", rad2pnex(hor.az), rad2pnex(hor.alt));
+
+    Serial.write(tmp);
 }
 
-void cmdGetAzPreciseCoords(char *cmd)
+void cmdSyncEqCoords(char *cmd)
 {
-    //TODO
-    cmdGetEqPreciseCoords(cmd);
-}
+    EqCoords eq;
 
-// Return true if a given position is close to the current axis position
-// (approx. 11 degrees)
-bool isClose(uint32_t pos, uint8_t axis)
-{
-    uint32_t curr, diff;
+    if (cmd[0] == 'S') {
+        uint16_t ra, dec;
+        sscanf(cmd + 1, "%4x,%4x", &ra, &dec);
+        eq.ra = nex2rad(ra);
+        eq.dec = nex2rad(dec);
+    } else {
+        uint32_t ra, dec;
+        sscanf(cmd + 1, "%8lx,%8lx", &ra, &dec);
+        eq.ra = pnex2rad(ra);
+        eq.dec = pnex2rad(dec);
+    }
 
-    scope.getPosition(axis, &curr);
-    diff = (pos > curr) ? (pos - curr) : (curr - pos);
-    return diff < 0x08000000;
+    setEqCoords(eq);
+    Serial.write('#');
 }
 
 void cmdGotoEqCoords(char *cmd)
 {
-    uint32_t ra_pos, dec_pos;
-    sscanf(cmd, "R%4lx,%4lx", &ra_pos, &dec_pos);
-    ra_pos = reverse(ra_pos << 16) + getRADiff();
-    dec_pos <<= 16;
+    EqCoords eq;
 
-    scope.gotoPosition(DEV_RA, isClose(ra_pos, DEV_RA), ra_pos);
-    scope.gotoPosition(DEV_DEC, isClose(dec_pos, DEV_DEC), dec_pos);
-    Serial.write('#');
-}
+    if (cmd[0] == 'R') {
+        uint16_t ra, dec;
+        sscanf(cmd + 1, "%4x,%4x", &ra, &dec);
+        eq.ra = nex2rad(ra);
+        eq.dec = nex2rad(dec);
+    } else {
+        uint32_t ra, dec;
+        sscanf(cmd + 1, "%8lx,%8lx", &ra, &dec);
+        eq.ra = pnex2rad(ra);
+        eq.dec = pnex2rad(dec);
+    }
 
-void cmdGotoEqPreciseCoords(char *cmd)
-{
-    uint32_t ra_pos, dec_pos;
-    sscanf(cmd, "r%8lx,%8lx", &ra_pos, &dec_pos);
-    ra_pos = reverse(ra_pos) + getRADiff();
-
-    scope.gotoPosition(DEV_RA, isClose(ra_pos, DEV_RA), ra_pos);
-    scope.gotoPosition(DEV_DEC, isClose(dec_pos, DEV_DEC), dec_pos);
+    gotoEqCoords(eq);
     Serial.write('#');
 }
 
 void cmdGotoAzCoords(char *cmd)
 {
-    //TODO
-    cmdGotoEqCoords(cmd);
-}
+    HorizCoords hor;
 
-void cmdGotoAzPreciseCoords(char *cmd)
-{
-    //TODO
-    cmdGotoEqPreciseCoords(cmd);
+    if (cmd[0] == 'B') {
+        uint16_t az, alt;
+        sscanf(cmd + 1, "%4x,%4x", &az, &alt);
+        hor.az = nex2rad(az);
+        hor.alt = nex2rad(alt);
+    } else {
+        uint32_t az, alt;
+        sscanf(cmd + 1, "%8lx,%8lx", &az, &alt);
+        hor.az = pnex2rad(az);
+        hor.alt = pnex2rad(alt);
+    }
+
+    gotoAzCoords(hor);
+    Serial.write('#');
 }
 
 void cmdGotoInProgress(char *cmd)
@@ -144,26 +231,6 @@ void cmdCancelGoto(char *cmd)
     Serial.write('#');
 }
 
-void cmdSyncEqCoords(char *cmd)
-{
-    uint32_t ra_pos, dec_pos;
-    sscanf(cmd, "S%4lx,%4lx", &ra_pos, &dec_pos);
-    scope.setPosition(DEV_RA, reverse(ra_pos << 16));
-    scope.setPosition(DEV_DEC, dec_pos << 16);
-    Serial.write('#');
-    t_sync = millis();
-}
-
-void cmdSyncEqPreciseCoords(char *cmd)
-{
-    uint32_t ra_pos, dec_pos;
-    sscanf(cmd, "s%8lx,%8lx", &ra_pos, &dec_pos);
-    scope.setPosition(DEV_RA, reverse(ra_pos));
-    scope.setPosition(DEV_DEC, dec_pos);
-    Serial.write('#');
-    t_sync = millis();
-}
-
 void cmdGetTrackingMode(char *cmd)
 {
     Serial.write(tracking_mode);
@@ -172,6 +239,7 @@ void cmdGetTrackingMode(char *cmd)
 
 void cmdSetTrackingMode(char *cmd)
 {
+    //TODO: store tracking mode in EEPROM and start tracking at start
     tracking_mode = cmd[1];
     scope.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
     scope.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
@@ -190,39 +258,77 @@ void cmdSetTrackingMode(char *cmd)
 
 void cmdGetLocation(char *cmd)
 {
-    // Read the location from EEPROM
-    for (int i = 0; i < 8; i++) {
-        Serial.write(EEPROM.read(i));
-    }
+    SxAngle sxLat, sxLong;
+
+    rad2sx(location.latitude, &sxLat);
+    Serial.write(sxLat.deg);
+    Serial.write(sxLat.min);
+    Serial.write(sxLat.sec);
+    Serial.write(sxLat.sign);
+
+    rad2sx(location.longitude, &sxLong);
+    Serial.write(sxLong.deg);
+    Serial.write(sxLong.min);
+    Serial.write(sxLong.sec);
+    Serial.write(sxLong.sign);
     Serial.write('#');
 }
 
 void cmdSetLocation(char *cmd)
 {
+    SxAngle latitude = {
+        (uint8_t)cmd[1], (uint8_t)cmd[2],
+        (uint8_t)cmd[3], (uint8_t)cmd[4]
+    };
+    location.latitude = sx2rad(latitude);
+
+    SxAngle longitude = {
+        (uint8_t)cmd[5], (uint8_t)cmd[6],
+        (uint8_t)cmd[7], (uint8_t)cmd[8]
+    };
+    location.longitude = sx2rad(longitude);
+
     // Store the location in EEPROM
-    for (int i = 0; i < 8; i++) {
-        EEPROM.write(i, cmd[i + 1]);
-    }
+    //for (int i = 0; i < 8; i++) {
+        //EEPROM.write(i, cmd[i + 1]);
+    //}
     Serial.write('#');
 }
 
 void cmdGetTime(char *cmd)
 {
-    //TODO
-    Serial.write(17);   // hours
-    Serial.write(30);   // minutes
-    Serial.write(10);   // seconds
-    Serial.write(4);    // month
-    Serial.write(1);    // day
-    Serial.write(15);   // year
-    Serial.write(3);    // offset from GMT
-    Serial.write(0);    // Daylight saving
+    double ms = millis() - t_timeset;
+    double jd = jdate + ms/(1000.0*60*60*24);
+
+    Date date;
+    dateFromJ2000(jd, &date);
+
+    Serial.write(date.hour);
+    Serial.write(date.min);
+    Serial.write(date.sec);
+    Serial.write(date.month);
+    Serial.write(date.day);
+    Serial.write(date.year % 2000);
+    Serial.write(date.offset);
+    Serial.write(date.dst);
     Serial.write("#");
 }
 
 void cmdSetTime(char *cmd)
 {
-    //TODO
+    Date date;
+    date.hour = (int)cmd[1];
+    date.min = (int)cmd[2];
+    date.sec = (int)cmd[3];
+    date.month = (int)cmd[4];
+    date.day = (int)cmd[5];
+    date.year = 2000 + (int)cmd[6];
+    date.offset = (int)cmd[7];
+    date.dst = (int)cmd[8];
+
+    jdate = getJ2000Date(date);
+    t_timeset = millis();
+
     Serial.write('#');
 }
 
@@ -283,23 +389,40 @@ void cmdGetAbsPosition(char *cmd)
     Serial.write(tmp);
 }
 
+void cmdDebugLST(char *cmd)
+{
+    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
+    double lst = getLST(jd, location);
+
+    Serial.print(lst, 6);
+    Serial.print('#');
+}
+
+void cmdDebugJulianTime(char *cmd)
+{
+    Serial.print(jdate, 6);
+    Serial.print('#');
+}
+
 void setup()
 {
     // Map serial commands to functions
     sCmd.addCommand('E', 1, cmdGetEqCoords);
-    sCmd.addCommand('e', 1, cmdGetEqPreciseCoords);
+    sCmd.addCommand('e', 1, cmdGetEqCoords);
     sCmd.addCommand('Z', 1, cmdGetAzCoords);
-    sCmd.addCommand('z', 1, cmdGetAzPreciseCoords);
-
-    sCmd.addCommand('R', 10, cmdGotoEqCoords);
-    sCmd.addCommand('r', 18, cmdGotoEqPreciseCoords);
-    sCmd.addCommand('B', 10, cmdGotoAzCoords);
-    sCmd.addCommand('b', 18, cmdGotoAzPreciseCoords);
-    sCmd.addCommand('L', 1, cmdGotoInProgress);
-    sCmd.addCommand('M', 1, cmdCancelGoto);
+    sCmd.addCommand('z', 1, cmdGetAzCoords);
 
     sCmd.addCommand('S', 10, cmdSyncEqCoords);
-    sCmd.addCommand('s', 18, cmdSyncEqPreciseCoords);
+    sCmd.addCommand('s', 18, cmdSyncEqCoords);
+
+    sCmd.addCommand('R', 10, cmdGotoEqCoords);
+    sCmd.addCommand('r', 18, cmdGotoEqCoords);
+
+    sCmd.addCommand('B', 10, cmdGotoAzCoords);
+    sCmd.addCommand('b', 18, cmdGotoAzCoords);
+
+    sCmd.addCommand('L', 1, cmdGotoInProgress);
+    sCmd.addCommand('M', 1, cmdCancelGoto);
 
     sCmd.addCommand('T', 2, cmdSetTrackingMode);
     sCmd.addCommand('t', 1, cmdGetTrackingMode);
@@ -315,8 +438,10 @@ void setup()
     sCmd.addCommand('m', 1, cmdGetModel);
     sCmd.addCommand('K', 2, cmdEcho);
 
-    // custom command
+    // custom commands
     sCmd.addCommand('U', 1, cmdGetAbsPosition);
+    sCmd.addCommand('d', 1, cmdDebugLST);
+    sCmd.addCommand('j', 1, cmdDebugJulianTime);
 
     //sCmd.addCommand('J', 1, cmdAlignmentComplete);
     //sCmd.addCommand('x', 1, cmdHibernate);

@@ -1,5 +1,4 @@
 /build*/**
-/commTest/**/build*/**
 *.*~
 *~
 *.cpp~
@@ -7,3 +6,5 @@
 *.swp
 *_OLD*
 *ino_
+*.pyc
+.lvimrc
