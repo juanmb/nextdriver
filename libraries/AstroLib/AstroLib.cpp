@@ -35,17 +35,11 @@ void sx2string(SxAngle sx, char *buffer)
         buffer[0] = '-';
 }
 
-inline double to24h(double h)
-{
-    int ih = (int)h;
-    h -= (double)(ih/24) * 24;
-    return h < 0 ? h + 24 : h;
-}
-
 inline double normalize2pi(double h)
 {
     int ih = (int)(h/2/M_PI);
-    return h - (double)ih*2*M_PI;
+    h = h - (double)ih*2*M_PI;
+    return h < 0 ? h + 2*M_PI : h;
 }
 
 // Calculate the julian date of the noon of a given date

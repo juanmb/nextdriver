@@ -22,6 +22,9 @@ Documentation:
 
 ## Compiling
 
+The library AstroLib, wich is part of this project, must be installed in the
+libraries directory of Arduino.
+
 The code can be compiled and uploaded to the Arduino using `make`.
 The provided Makefile requires [Arduino-Makefile](https://github.com/sudar/Arduino-Makefile)
 to work. In Debian/Ubuntu/Mint, you can install it with

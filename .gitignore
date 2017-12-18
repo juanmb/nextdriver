@@ -1,6 +1,7 @@
 /build*/**
 *.*~
 *~
+*.o
 *.cpp~
 *.h~
 *.swp
@@ -8,3 +9,4 @@
 *ino_
 *.pyc
 .lvimrc
+test.run
