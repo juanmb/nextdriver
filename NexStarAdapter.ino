@@ -25,21 +25,30 @@
 #define RA_POT_PIN A6
 #define DEC_POT_PIN A7
 
-enum Status {
+enum ScopeState {
     ST_IDLE,
     ST_GOING_FAST,
     ST_GOING_SLOW,
 };
 
-Status scopeStatus = ST_IDLE;
-SerialCommand sCmd;
-NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
+enum ScopeEvent {
+    EV_NONE,
+    EV_GOTO,
+    EV_ABORT,
+};
+
+ScopeState state = ST_IDLE;
+ScopeEvent event = EV_NONE;
 
 double jdate = 0.0;    // Julian date refered to J2000
 Location location = {0};
 uint8_t tracking_mode = 0;
 uint32_t t_timeset = 0;
 uint32_t t_sync = 0;
+EqCoords target = {0};
+
+SerialCommand sCmd;
+NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
 
 
 // Convert nexstar angle format to radians
@@ -88,20 +97,19 @@ void setEqCoords(EqCoords eq)
     t_sync = millis();
 }
 
-void gotoEqCoords(EqCoords eq)
+void stopMotors()
+{
+    scope.move(DEV_RA, 0, 0);
+    scope.move(DEV_DEC, 0, 0);
+}
+
+void gotoEqCoords(EqCoords eq, bool slow)
 {
     uint32_t ra_pos = rad2pnex(2*M_PI - eq.ra + getRADiff());
     uint32_t dec_pos = rad2pnex(eq.dec);
 
-    EqCoords curr_eq;
-    getEqCoords(&curr_eq);
-
-    // perform a 'slow slew' if the movement is less than 10 degrees
-    bool slow_ra = fabs(curr_eq.ra - eq.ra) < M_PI/18;
-    bool slow_dec = fabs(curr_eq.dec - eq.dec) < M_PI/18;
-
-    scope.gotoPosition(DEV_RA, slow_ra, ra_pos);
-    scope.gotoPosition(DEV_DEC, slow_dec, dec_pos);
+    scope.gotoPosition(DEV_RA, slow, ra_pos);
+    scope.gotoPosition(DEV_DEC, slow, dec_pos);
 }
 
 void getAzCoords(HorizCoords *hor)
@@ -113,16 +121,6 @@ void getAzCoords(HorizCoords *hor)
     getEqCoords(&eq);
 
     eqToHoriz(lst, location, eq, hor);
-}
-
-void gotoAzCoords(HorizCoords hor)
-{
-    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
-    double lst = getLST(jd, location);
-
-    EqCoords eq;
-    horizToEq(lst, location, hor, &eq);
-    gotoEqCoords(eq);
 }
 
 void cmdGetEqCoords(char *cmd)
@@ -177,21 +175,19 @@ void cmdSyncEqCoords(char *cmd)
 
 void cmdGotoEqCoords(char *cmd)
 {
-    EqCoords eq;
-
     if (cmd[0] == 'R') {
         uint16_t ra, dec;
         sscanf(cmd + 1, "%4x,%4x", &ra, &dec);
-        eq.ra = nex2rad(ra);
-        eq.dec = nex2rad(dec);
+        target.ra = nex2rad(ra);
+        target.dec = nex2rad(dec);
     } else {
         uint32_t ra, dec;
         sscanf(cmd + 1, "%8lx,%8lx", &ra, &dec);
-        eq.ra = pnex2rad(ra);
-        eq.dec = pnex2rad(dec);
+        target.ra = pnex2rad(ra);
+        target.dec = pnex2rad(dec);
     }
 
-    gotoEqCoords(eq);
+    event = EV_GOTO;
     Serial.write('#');
 }
 
@@ -211,23 +207,23 @@ void cmdGotoAzCoords(char *cmd)
         hor.alt = pnex2rad(alt);
     }
 
-    gotoAzCoords(hor);
+    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
+    double lst = getLST(jd, location);
+    horizToEq(lst, location, hor, &target);
+
+    event = EV_GOTO;
     Serial.write('#');
 }
 
 void cmdGotoInProgress(char *cmd)
 {
-    bool ra_done, dec_done;
-    scope.slewDone(DEV_RA, &ra_done);
-    scope.slewDone(DEV_DEC, &dec_done);
-    Serial.write((ra_done && dec_done) ? '0' : '1');
+    Serial.write(state == ST_IDLE ? '0' : '1');
     Serial.write('#');
 }
 
 void cmdCancelGoto(char *cmd)
 {
-    scope.move(DEV_RA, 0, 0);
-    scope.move(DEV_DEC, 0, 0);
+    event = EV_ABORT;
     Serial.write('#');
 }
 
@@ -448,12 +444,87 @@ void setup()
     //sCmd.addCommand('y', 1, cmdWakeup);
 
     pinMode(AUX_SELECT, OUTPUT);
+    pinMode(LED_BUILTIN, OUTPUT);
 
     Serial.begin(BAUDRATE);
     scope.begin();
 }
 
+// Check if both motors have reached their target position
+bool slewDone()
+{
+    bool ra_done, dec_done;
+
+    scope.slewDone(DEV_RA, &ra_done);
+    scope.slewDone(DEV_DEC, &dec_done);
+    return ra_done && dec_done;
+}
+
+// Check if both motors are less than 10 degrees away from the target
+bool isClose()
+{
+    EqCoords current;
+    getEqCoords(&current);
+
+    bool ra_diff = fabs(current.ra - target.ra);
+    bool dec_diff = fabs(current.dec - target.dec);
+
+    return fmax(ra_diff, dec_diff) < M_PI/18;
+}
+
+// Update the scope status with a simple state machine
+void updateFSM()
+{
+    static uint32_t t_timer;
+
+    switch(state) {
+        case ST_IDLE:
+            if (event == EV_GOTO) {
+                t_timer = millis();
+                if (isClose()) {
+                    gotoEqCoords(target, true);
+                    state = ST_GOING_SLOW;
+                } else {
+                    gotoEqCoords(target, false);
+                    state = ST_GOING_FAST;
+                }
+            }
+            break;
+
+        case ST_GOING_FAST:
+            if (event == EV_ABORT) {
+                stopMotors();
+                state = ST_IDLE;
+            } else if (millis() - t_timer > 1000) {
+                // Every second, check if we are close to the target
+                t_timer = millis();
+
+                if (slewDone()) {
+                    gotoEqCoords(target, true);
+                    state = ST_GOING_SLOW;
+                }
+            }
+            break;
+
+        case ST_GOING_SLOW:
+            if (event == EV_ABORT) {
+                stopMotors();
+                state = ST_IDLE;
+            } else if (millis() - t_timer > 1000) {
+                // Every second, check if slew is done
+                t_timer = millis();
+
+                if (slewDone())
+                    state = ST_IDLE;
+            }
+            break;
+    };
+
+    event = EV_NONE;
+}
+
 void loop()
 {
     sCmd.readSerial();
+    updateFSM();
 }

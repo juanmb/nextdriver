@@ -55,7 +55,6 @@ NexStarAux::NexStarAux(int rx, int tx, int select)
 // Initialize pins and setup serial port
 void NexStarAux::begin()
 {
-    pinMode(LED_BUILTIN, OUTPUT);
     pinMode(select_pin, INPUT);
     serial->begin(AUX_BAUDRATE);
 }
@@ -100,7 +99,6 @@ int NexStarAux::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
     pinMode(select_pin, INPUT);
 
     serial->flush();
-    digitalWrite(LED_BUILTIN, HIGH);
 
     long int t0 = millis();
 
@@ -108,7 +106,6 @@ int NexStarAux::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
     // wait while select pin is low
     while(digitalRead(select_pin) == HIGH) {
         if (millis() - t0 > RESP_TIMEOUT) {
-            digitalWrite(LED_BUILTIN, LOW);
             return ERR_TIMEOUT;
         }
         delay(1);
@@ -117,11 +114,9 @@ int NexStarAux::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
     while(digitalRead(select_pin) == LOW) {
         delay(1);
         if (millis() - t0 > RESP_TIMEOUT) {
-            digitalWrite(LED_BUILTIN, LOW);
             return ERR_TIMEOUT;
         }
     }
-    digitalWrite(LED_BUILTIN, LOW);
 
     bytes = (char*)(resp);
     unsigned int pos = 0;
