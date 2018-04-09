@@ -70,7 +70,7 @@ int NexStarAux::newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
     }
     msg->header.preamble = 0x3b;
     msg->header.length = size + 3;
-    msg->header.source = hand_controller;
+    msg->header.source = DEV_HC;
     msg->header.dest = dest;
     msg->header.id = id;
     memcpy(msg->payload, data, size);
@@ -79,7 +79,7 @@ int NexStarAux::newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
 }
 
 // Send a message and receive its response
-int NexStarAux::sendMessage(uint8_t dest, uint8_t id, uint8_t size,
+int NexStarAux::sendCommand(uint8_t dest, uint8_t id, uint8_t size,
         char* data, NexStarMessage *resp)
 {
     NexStarMessage msg;
@@ -141,13 +141,13 @@ int NexStarAux::setPosition(uint8_t dest, uint32_t pos)
     NexStarMessage resp;
     char payload[3];
     uint32To24bits(pos, payload);
-    return sendMessage(dest, 0x04, 3, payload, &resp);
+    return sendCommand(dest, MC_SET_POSITION, 3, payload, &resp);
 }
 
 int NexStarAux::getPosition(uint8_t dest, uint32_t *pos)
 {
     NexStarMessage resp;
-    int ret = sendMessage(dest, 0x01, 0, NULL, &resp);
+    int ret = sendCommand(dest, MC_GET_POSITION, 0, NULL, &resp);
     *pos = uint32From24bits(resp.payload);
     return ret;
 }
@@ -158,10 +158,8 @@ int NexStarAux::gotoPosition(uint8_t dest, bool slow, uint32_t pos)
     char payload[3];
     uint32To24bits(pos, payload);
 
-    if (slow) {
-        return sendMessage(dest, 0x17, 3, payload, &resp);
-    }
-    return sendMessage(dest, 0x02, 3, payload, &resp);
+    char msgId = slow ? MC_GOTO_SLOW : MC_GOTO_FAST;
+    return sendCommand(dest, msgId, 3, payload, &resp);
 }
 
 int NexStarAux::move(uint8_t dest, bool dir, uint8_t rate)
@@ -169,16 +167,14 @@ int NexStarAux::move(uint8_t dest, bool dir, uint8_t rate)
     NexStarMessage resp;
     uint8_t payload[1] = { rate };
 
-    if (dir) {
-        return sendMessage(dest, 0x24, 1, (char *)payload, &resp);
-    }
-    return sendMessage(dest, 0x025, 1, (char *)payload, &resp);
+    char msgId = dir ? MC_MOVE_POS : MC_MOVE_NEG;
+    return sendCommand(dest, msgId, 1, (char *)payload, &resp);
 }
 
 int NexStarAux::slewDone(uint8_t dest, bool *done)
 {
     NexStarMessage resp;
-    int ret = sendMessage(dest, 0x13, 0, NULL, &resp);
+    int ret = sendCommand(dest, MC_SLEW_DONE, 0, NULL, &resp);
     *done = (bool)resp.payload[0];
     return ret;
 }
@@ -190,22 +186,22 @@ int NexStarAux::setGuiderate(uint8_t dest, bool dir, bool custom_rate, uint32_t 
     char payload[3];
     uint32To24bits(rate << 16, payload);
 
-    char msgId = dir ? 0x06 : 0x07;
+    char msgId = dir ? MC_SET_POS_GUIDERATE : MC_SET_NEG_GUIDERATE;
     char msgSize = custom_rate ? 3 : 2;
-    return sendMessage(dest, msgId, msgSize, payload, &resp);
+    return sendCommand(dest, msgId, msgSize, payload, &resp);
 }
 
 int NexStarAux::setApproach(uint8_t dest, bool dir)
 {
     NexStarMessage resp;
     char payload[1] = { dir };
-    return sendMessage(dest, 0xfd, 1, payload, &resp);
+    return sendCommand(dest, MC_SET_APPROACH, 1, payload, &resp);
 }
 
 int NexStarAux::getApproach(uint8_t dest, bool *dir)
 {
     NexStarMessage resp;
-    int ret = sendMessage(dest, 0xfc, 0, NULL, &resp);
+    int ret = sendCommand(dest, MC_GET_APPROACH, 0, NULL, &resp);
     *dir = (bool)resp.payload[0];
     return ret;
 }

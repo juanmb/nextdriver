@@ -334,7 +334,7 @@ void cmdPassThrough(char *cmd)
     uint8_t size = cmd[1] - 1;
 
     // pass the command to the mount
-    int ret = scope.sendMessage(cmd[2], cmd[3], size, &cmd[4], &resp);
+    int ret = scope.sendCommand(cmd[2], cmd[3], size, &cmd[4], &resp);
     if (ret != 0) {
         // TODO: return a response with size = normal_return_size + 1
         Serial.print(ret);
@@ -370,6 +370,17 @@ void cmdGetModel(char *cmd)
 void cmdEcho(char *cmd)
 {
     Serial.write(cmd[1]);
+    Serial.write('#');
+}
+
+void cmdHibernate(char *cmd)
+{
+    //TODO
+}
+
+void cmdWakeup(char *cmd)
+{
+    //TODO
     Serial.write('#');
 }
 
@@ -440,8 +451,8 @@ void setup()
     sCmd.addCommand('j', 1, cmdDebugJulianTime);
 
     //sCmd.addCommand('J', 1, cmdAlignmentComplete);
-    //sCmd.addCommand('x', 1, cmdHibernate);
-    //sCmd.addCommand('y', 1, cmdWakeup);
+    sCmd.addCommand('x', 1, cmdHibernate);
+    sCmd.addCommand('y', 1, cmdWakeup);
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);

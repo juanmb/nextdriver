@@ -4,6 +4,10 @@
     This code is part of the NexStarAdapter project:
         https://github.com/juanmb/NexStarAdapter
 
+    This code is based on Andre Paquette's documentation about
+    the NexStar AUX protocol:
+    http://www.paquettefamily.ca/nexstar/NexStar_AUX_Commands_10.pdf
+
 *******************************************************************/
 
 #ifndef _NexStarAux_h_
@@ -22,37 +26,64 @@
 #define ERR_BAD_HDR -4
 #define ERR_CRC -5
 
-#define TRACKING_NONE 0
-#define TRACKING_ALTAZ 1
-#define TRACKING_EQ_NORTH 2
-#define TRACKING_EQ_SOUTH 3
+#define TRACKING_NONE       0
+#define TRACKING_ALTAZ      1
+#define TRACKING_EQ_NORTH   2
+#define TRACKING_EQ_SOUTH   3
 
 #define GUIDERATE_NEG 0
 #define GUIDERATE_POS 1
 
-#define GUIDERATE_SIDEREAL 0xffff
-#define GUIDERATE_SOLAR 0xfffe
-#define GUIDERATE_LUNAR 0xfffd
+#define GUIDERATE_SIDEREAL  0xffff
+#define GUIDERATE_SOLAR     0xfffe
+#define GUIDERATE_LUNAR     0xfffd
 
 // device IDs
-#define DEV_MAIN 0x01
-#define DEV_HC 0x04
-#define DEV_RA 0x10
-#define DEV_AZ 0x10
-#define DEV_DEC 0x11
-#define DEV_ALT 0x11
-#define DEV_GPS 0xb0
-#define DEV_RTC 0xb2
+#define DEV_MAIN    0x01
+#define DEV_HC      0x04
+#define DEV_RA      0x10
+#define DEV_AZ      0x10
+#define DEV_DEC     0x11
+#define DEV_ALT     0x11
+#define DEV_GPS     0xb0
+#define DEV_RTC     0xb2
 
-
-typedef enum deviceId {
-    main_board = 1,
-    hand_controller = 4,
-    ra_motor = 16,
-    dec_motor = 17,
-    gps_dev = 176,
-    rtc_dev = 178,
-} deviceId;
+// command IDs
+#define MC_GET_POSITION         0x01
+#define MC_GOTO_FAST            0x02
+#define MC_SET_POSITION         0x04
+#define MC_SET_POS_GUIDERATE    0x06
+#define MC_SET_NEG_GUIDERATE    0x07
+#define MC_LEVEL_START          0x0b
+#define MC_PEC_RECORD_START     0x0c
+#define MC_PEC_PLAYBACK         0x0d
+#define MC_SET_POS_BACKLASH     0x10
+#define MC_SET_NEG_BACKLASH     0x11
+#define MC_LEVEL_DONE           0x12
+#define MC_SLEW_DONE            0x13
+#define MC_PEC_RECORD_DONE      0x15
+#define MC_PEC_RECORD_STOP      0x16
+#define MC_GOTO_SLOW            0x17
+#define MC_AT_INDEX             0x18
+#define MC_SEEK_INDEX           0x19
+#define MC_MOVE_POS             0x24
+#define MC_MOVE_NEG             0x25
+#define MC_ENABLE_CORDWRAP      0x38
+#define MC_DISABLE_CORDWRAP     0x39
+#define MC_SET_CORDWRAP_POS     0x3a
+#define MC_POLL_CORDWRAP        0x3b
+#define MC_GET_CORDWRAP_POS     0x3c
+#define MC_GET_POS_BACKLASH     0x40
+#define MC_GET_NEG_BACKLASH     0x41
+#define MC_SET_AUTOGUIDE_RATE   0x46
+#define MC_GET_AUTOGUIDE_RATE   0x47
+#define MC_PROGRAM_ENTER        0x81
+#define MC_PROGRAM_INIT         0x82
+#define MC_PROGRAM_DATA         0x83
+#define MC_PROGRAM_END          0x84
+#define MC_GET_APPROACH         0xfc
+#define MC_SET_APPROACH         0xfd
+#define MC_GET_VER              0xfe
 
 
 typedef struct NexStarHeader {
@@ -73,7 +104,7 @@ struct NexStarMessage {
 class NexStarAux {
 public:
     NexStarAux(int rx, int tx, int select);
-    int sendMessage(uint8_t dest, uint8_t id, uint8_t size, char* data,
+    int sendCommand(uint8_t dest, uint8_t id, uint8_t size, char* data,
             NexStarMessage *resp);
     void begin();
 
