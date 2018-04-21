@@ -235,7 +235,7 @@ void cmdGetTrackingMode(char *cmd)
 
 void cmdSetTrackingMode(char *cmd)
 {
-    //TODO: store tracking mode in EEPROM and start tracking at start
+    //TODO: store tracking mode in EEPROM and engage tracking at start
     tracking_mode = cmd[1];
     scope.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
     scope.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
@@ -330,21 +330,20 @@ void cmdSetTime(char *cmd)
 
 void cmdPassThrough(char *cmd)
 {
-    NexStarMessage resp;
-    uint8_t size = cmd[1] - 1;
+    char resp[8];
+    uint8_t size;
 
-    // pass the command to the mount
-    int ret = scope.sendCommand(cmd[2], cmd[3], size, &cmd[4], &resp);
-    if (ret != 0) {
-        // TODO: return a response with size = normal_return_size + 1
-        Serial.print(ret);
-        Serial.write('#');
-        return;
+    if (scope.sendPassThrough(cmd, resp, &size) == 0) {
+        for (int i=0; i < size; i++) {
+            Serial.write(resp[i]);
+        }
+    } else {
+        // indicate an error by returning a response of size = resp_size + 1
+        for (int i=0; i <= size; i++) {
+            Serial.write('0');
+        }
     }
 
-    for (int i = 0; i < resp.header.length - 3; i++) {
-        Serial.write(resp.payload[i]);
-    }
     Serial.write('#');
 }
 
@@ -458,7 +457,7 @@ void setup()
     pinMode(LED_BUILTIN, OUTPUT);
 
     Serial.begin(BAUDRATE);
-    scope.begin();
+    scope.init();
 }
 
 // Check if both motors have reached their target position

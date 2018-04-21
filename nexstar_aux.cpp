@@ -53,7 +53,7 @@ NexStarAux::NexStarAux(int rx, int tx, int select)
 }
 
 // Initialize pins and setup serial port
-void NexStarAux::begin()
+void NexStarAux::init()
 {
     pinMode(select_pin, INPUT);
     serial->begin(AUX_BAUDRATE);
@@ -158,8 +158,8 @@ int NexStarAux::gotoPosition(uint8_t dest, bool slow, uint32_t pos)
     char payload[3];
     uint32To24bits(pos, payload);
 
-    char msgId = slow ? MC_GOTO_SLOW : MC_GOTO_FAST;
-    return sendCommand(dest, msgId, 3, payload, &resp);
+    char cmdId = slow ? MC_GOTO_SLOW : MC_GOTO_FAST;
+    return sendCommand(dest, cmdId, 3, payload, &resp);
 }
 
 int NexStarAux::move(uint8_t dest, bool dir, uint8_t rate)
@@ -167,8 +167,8 @@ int NexStarAux::move(uint8_t dest, bool dir, uint8_t rate)
     NexStarMessage resp;
     uint8_t payload[1] = { rate };
 
-    char msgId = dir ? MC_MOVE_POS : MC_MOVE_NEG;
-    return sendCommand(dest, msgId, 1, (char *)payload, &resp);
+    char cmdId = dir ? MC_MOVE_POS : MC_MOVE_NEG;
+    return sendCommand(dest, cmdId, 1, (char *)payload, &resp);
 }
 
 int NexStarAux::slewDone(uint8_t dest, bool *done)
@@ -186,9 +186,9 @@ int NexStarAux::setGuiderate(uint8_t dest, bool dir, bool custom_rate, uint32_t 
     char payload[3];
     uint32To24bits(rate << 16, payload);
 
-    char msgId = dir ? MC_SET_POS_GUIDERATE : MC_SET_NEG_GUIDERATE;
+    char cmdId = dir ? MC_SET_POS_GUIDERATE : MC_SET_NEG_GUIDERATE;
     char msgSize = custom_rate ? 3 : 2;
-    return sendCommand(dest, msgId, msgSize, payload, &resp);
+    return sendCommand(dest, cmdId, msgSize, payload, &resp);
 }
 
 int NexStarAux::setApproach(uint8_t dest, bool dir)
@@ -203,5 +203,51 @@ int NexStarAux::getApproach(uint8_t dest, bool *dir)
     NexStarMessage resp;
     int ret = sendCommand(dest, MC_GET_APPROACH, 0, NULL, &resp);
     *dir = (bool)resp.payload[0];
+    return ret;
+}
+
+int NexStarAux::getVersion(uint8_t dest, char *major, char *minor)
+{
+    NexStarMessage resp;
+    int ret = sendCommand(dest, MC_GET_VER, 0, NULL, &resp);
+    *major = resp.payload[0];
+    *minor = resp.payload[1];
+    return ret;
+}
+
+int NexStarAux::sendPassThrough(char *cmd, char *resp, uint8_t *resp_size)
+{
+    uint8_t size = cmd[1] - 1;
+    uint8_t dest = cmd[2];
+    uint8_t cmdId = cmd[3];
+    char *payload = &cmd[4];
+    int ret = 0;
+
+    // expected response length
+    *resp_size = cmd[7];
+
+    // process command
+    switch(cmdId) {
+        case MC_GET_VER:
+            ret = getVersion(dest, &resp[0], &resp[1]);
+            break;
+        case MC_SET_POSITION:
+            ret = setPosition(dest, (uint32_t)(*payload));
+            break;
+        case MC_GET_POSITION:
+            ret = getPosition(dest, (uint32_t*)resp);
+            break;
+        case MC_MOVE_POS:
+        case MC_MOVE_NEG:
+            ret = move(dest, cmdId == MC_MOVE_POS, payload[0]);
+            break;
+        default:
+            // pass the raw command to the scope
+            NexStarMessage msg;
+            ret = sendCommand(dest, cmdId, size, payload, &msg);
+            if (ret == 0)
+                memcpy(resp, msg.payload, *resp_size);
+    }
+
     return ret;
 }

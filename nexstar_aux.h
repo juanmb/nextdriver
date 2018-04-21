@@ -10,8 +10,8 @@
 
 *******************************************************************/
 
-#ifndef _NexStarAux_h_
-#define _NexStarAux_h_
+#ifndef _nexstar_aux_h_
+#define _nexstar_aux_h_
 
 #include <SoftwareSerial.h>
 #include <inttypes.h>
@@ -68,6 +68,8 @@
 #define MC_SEEK_INDEX           0x19
 #define MC_MOVE_POS             0x24
 #define MC_MOVE_NEG             0x25
+#define MC_MOVE_PULSE           0x26
+#define MC_GET_PULSE_STATUS     0x27
 #define MC_ENABLE_CORDWRAP      0x38
 #define MC_DISABLE_CORDWRAP     0x39
 #define MC_SET_CORDWRAP_POS     0x3a
@@ -104,9 +106,7 @@ struct NexStarMessage {
 class NexStarAux {
 public:
     NexStarAux(int rx, int tx, int select);
-    int sendCommand(uint8_t dest, uint8_t id, uint8_t size, char* data,
-            NexStarMessage *resp);
-    void begin();
+    void init();
 
     int setPosition(uint8_t dest, uint32_t pos);
     int getPosition(uint8_t dest, uint32_t *pos);
@@ -116,22 +116,25 @@ public:
     int slewDone(uint8_t dest, bool *done);
 
     int setGuiderate(uint8_t dest, bool dir, bool custom_rate, uint32_t rate);
-    int setAutoGuiderate(uint8_t dest, uint8_t rate);
-    int getAutoGuiderate(uint8_t dest, uint8_t *rate);
+    //int setAutoGuiderate(uint8_t dest, uint8_t rate);
+    //int getAutoGuiderate(uint8_t dest, uint8_t *rate);
 
     int setApproach(uint8_t dest, bool dir);
     int getApproach(uint8_t dest, bool *dir);
 
-    int setBacklash(uint8_t dest, bool dir, uint8_t steps);
-    int getBacklash(uint8_t dest, bool dir, uint8_t *steps);
+    //int setBacklash(uint8_t dest, bool dir, uint8_t steps);
+    //int getBacklash(uint8_t dest, bool dir, uint8_t *steps);
 
-    int getVersion(uint8_t dest, bool *done);
+    int getVersion(uint8_t dest, char *major, char *minor);
 
-protected:
-    int newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
-                   uint8_t size, char* data);
+    int sendPassThrough(char *cmd, char *resp, uint8_t *resp_size);
 
 private:
+    int newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
+            uint8_t size, char* data);
+    int sendCommand(uint8_t dest, uint8_t id, uint8_t size, char* data,
+            NexStarMessage *resp);
+
     SoftwareSerial *serial;
     int select_pin;
 };
