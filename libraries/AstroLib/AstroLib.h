@@ -32,6 +32,12 @@ struct EqCoords {
     double dec;
 };
 
+// Equatorial coordinates in radians, with hour angle instead of RA
+struct EqHACoords {
+    double ha;
+    double dec;
+};
+
 // Angle in sexagesimal format
 struct SxAngle {
 	uint8_t deg;
@@ -51,7 +57,7 @@ double getGMST(double jd);
 double getLST(double jd, Location loc);
 void dateFromJ2000(double jd, Date *date);
 
-void eqToHoriz(double lst, Location loc, EqCoords eq, HorizCoords *hor);
-void horizToEq(double lst, Location loc, HorizCoords hor, EqCoords *eq);
+void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor);
+void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq);
 
 #endif

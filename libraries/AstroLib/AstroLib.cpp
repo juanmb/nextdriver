@@ -130,18 +130,14 @@ double getLST(double jd, Location loc)
 }
 
 // Convert equatorial to horizontal coordinates
-// lst: Local Sidereal Time (in radians)
 // Reference: http://www.geocities.jp/toshimi_taki/matrix/matrix.htm
-void eqToHoriz(double lst, Location loc, EqCoords eq, HorizCoords *hor)
+void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor)
 {
     double x, y, z, x2, y2, z2;
 
-    // obtain the hour angle
-    double ha = lst - eq.ra;
-
     // Convert to rectangular coordinates
-    x = cos(-ha)*cos(eq.dec);
-    y = sin(-ha)*cos(eq.dec);
+    x = cos(-eq.ha)*cos(eq.dec);
+    y = sin(-eq.ha)*cos(eq.dec);
     z = sin(eq.dec);
 
     // Rotate the coordinate system along east-west axis
@@ -156,9 +152,8 @@ void eqToHoriz(double lst, Location loc, EqCoords eq, HorizCoords *hor)
 }
 
 // Convert horizontal to equatorial coordinates
-// lst: Local Sidereal Time (in radians)
 // Reference: http://www.geocities.jp/toshimi_taki/matrix/matrix.htm
-void horizToEq(double lst, Location loc, HorizCoords hor, EqCoords *eq)
+void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq)
 {
     double x, y, z, x2, y2, z2;
 
@@ -174,9 +169,9 @@ void horizToEq(double lst, Location loc, HorizCoords hor, EqCoords *eq)
     z2 = x*sin(zp) + z*cos(zp);
 
     // Convert to equatorial coordinates
-    eq->ra = lst + atan2(y2, x2);
+    eq->ha = -atan2(y2, x2);
     eq->dec = asin(z2);
 
-    if (eq->ra < 0)
-        eq->ra += 2*M_PI;
+    if (eq->ha < 0)
+        eq->ha += 2*M_PI;
 }

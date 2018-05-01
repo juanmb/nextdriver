@@ -40,17 +40,31 @@ enum ScopeEvent {
 ScopeState state = ST_IDLE;
 ScopeEvent event = EV_NONE;
 
-double jdate = 0.0;    // Julian date refered to J2000
-Location location = {0};
+Location location = {0.75894737, -0.10014247};   // Default location
 uint8_t tracking_mode = 0;
-uint32_t t_timeset = 0;
-uint32_t t_sync = 0;
+uint32_t ref_t = 0; // millis() at last cmdSetTime call
+double ref_lst = 0.0;  // Last synced LST
+double ref_jd = 0.0;     // Last synced julian date refered to J2000
+bool synced = false;
 EqCoords target = {0};
 
 SerialCommand sCmd;
-//NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
-NexStarStepper scope;
+//NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
+NexStarStepper nexstar;
 
+
+// Get current Julian date
+static double getCurrentJD()
+{
+    return ref_jd + (double)(millis() - ref_t)/(1000.0*60*60*24);
+}
+
+// Obtain current Local Sidereal Time from last synced time
+// This is faster than performing the full calculation from JD & location
+// by calling getLST()
+static double getCurrentLST() {
+    return ref_lst + (millis() - ref_t)*2*M_PI/8.616e7;
+}
 
 // Convert nexstar angle format to radians
 double nex2rad(uint16_t angle)
@@ -76,52 +90,51 @@ uint32_t rad2pnex(double rad)
     return (uint32_t)(rad * 0x100000000 / (2*M_PI));
 }
 
-// Obtain the difference in RA from the motor position due to Earth rotation
-static double getRADiff() {
-    return 2*M_PI/8.616e7*(millis() - t_sync);
-}
-
 void getEqCoords(EqCoords *eq)
 {
-    uint32_t ra_pos, dec_pos;
-    scope.getPosition(DEV_RA, &ra_pos);
-    scope.getPosition(DEV_DEC, &dec_pos);
+    uint32_t ha_pos, dec_pos;
+    nexstar.getPosition(DEV_RA, &ha_pos);
+    nexstar.getPosition(DEV_DEC, &dec_pos);
 
-    eq->ra = 2*M_PI - pnex2rad(ra_pos) + getRADiff();
+    eq->ra = getCurrentLST() - pnex2rad(ha_pos);
     eq->dec = pnex2rad(dec_pos);
-}
-
-void setEqCoords(EqCoords eq)
-{
-    scope.setPosition(DEV_RA, rad2pnex(2*M_PI - eq.ra));
-    scope.setPosition(DEV_DEC, rad2pnex(eq.dec));
-    t_sync = millis();
-}
-
-void stopMotors()
-{
-    scope.move(DEV_RA, 0, 0);
-    scope.move(DEV_DEC, 0, 0);
-}
-
-void gotoEqCoords(EqCoords eq, bool slow)
-{
-    uint32_t ra_pos = rad2pnex(2*M_PI - eq.ra + getRADiff());
-    uint32_t dec_pos = rad2pnex(eq.dec);
-
-    scope.gotoPosition(DEV_RA, slow, ra_pos);
-    scope.gotoPosition(DEV_DEC, slow, dec_pos);
 }
 
 void getAzCoords(HorizCoords *hor)
 {
-    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
-    double lst = getLST(jd, location);
+    uint32_t ha_pos, dec_pos;
+    nexstar.getPosition(DEV_RA, &ha_pos);
+    nexstar.getPosition(DEV_DEC, &dec_pos);
 
-    EqCoords eq;
-    getEqCoords(&eq);
+    EqHACoords eq;
+    eq.ha = pnex2rad(ha_pos);
+    eq.dec = pnex2rad(dec_pos);
+    eqToHoriz(location, eq, hor);
+}
 
-    eqToHoriz(lst, location, eq, hor);
+void setEqCoords(EqCoords eq)
+{
+    // compute the hour angle
+    double ha = getCurrentLST() - eq.ra;
+
+    nexstar.setPosition(DEV_RA, rad2pnex(ha));
+    nexstar.setPosition(DEV_DEC, rad2pnex(eq.dec));
+    synced = true;
+}
+
+void gotoEqCoords(EqCoords eq, bool slow)
+{
+    if (!synced)
+        return;
+
+    nexstar.gotoPosition(DEV_RA, slow, rad2pnex(getCurrentLST() - eq.ra));
+    nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(eq.dec));
+}
+
+void stopMotors()
+{
+    nexstar.move(DEV_RA, 0, 0);
+    nexstar.move(DEV_DEC, 0, 0);
 }
 
 void cmdGetEqCoords(char *cmd)
@@ -208,9 +221,10 @@ void cmdGotoAzCoords(char *cmd)
         hor.alt = pnex2rad(alt);
     }
 
-    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
-    double lst = getLST(jd, location);
-    horizToEq(lst, location, hor, &target);
+    EqHACoords eq;
+    horizToEq(location, hor, &eq);
+    target.ra = getCurrentLST() - eq.ha;
+    target.dec = eq.dec;
 
     event = EV_GOTO;
     Serial.write('#');
@@ -238,15 +252,15 @@ void cmdSetTrackingMode(char *cmd)
 {
     //TODO: store tracking mode in EEPROM and engage tracking at start
     tracking_mode = cmd[1];
-    scope.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
-    scope.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
+    nexstar.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
+    nexstar.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
 
     switch(tracking_mode) {
         case TRACKING_EQ_NORTH:
-            scope.setGuiderate(DEV_RA, GUIDERATE_POS, 0, GUIDERATE_SIDEREAL);
+            nexstar.setGuiderate(DEV_RA, GUIDERATE_POS, 0, GUIDERATE_SIDEREAL);
             break;
         case TRACKING_EQ_SOUTH:
-            scope.setGuiderate(DEV_RA, GUIDERATE_NEG, 0, GUIDERATE_SIDEREAL);
+            nexstar.setGuiderate(DEV_RA, GUIDERATE_NEG, 0, GUIDERATE_SIDEREAL);
             break;
     }
 
@@ -285,30 +299,14 @@ void cmdSetLocation(char *cmd)
     };
     location.longitude = sx2rad(longitude);
 
-    // Store the location in EEPROM
+    ref_lst = getLST(getCurrentJD(), location);
+    synced = false;
+
+    // TODO: Store the location in EEPROM
     //for (int i = 0; i < 8; i++) {
         //EEPROM.write(i, cmd[i + 1]);
     //}
     Serial.write('#');
-}
-
-void cmdGetTime(char *cmd)
-{
-    double ms = millis() - t_timeset;
-    double jd = jdate + ms/(1000.0*60*60*24);
-
-    Date date;
-    dateFromJ2000(jd, &date);
-
-    Serial.write(date.hour);
-    Serial.write(date.min);
-    Serial.write(date.sec);
-    Serial.write(date.month);
-    Serial.write(date.day);
-    Serial.write(date.year % 2000);
-    Serial.write(date.offset);
-    Serial.write(date.dst);
-    Serial.write("#");
 }
 
 void cmdSetTime(char *cmd)
@@ -323,10 +321,29 @@ void cmdSetTime(char *cmd)
     date.offset = (int)cmd[7];
     date.dst = (int)cmd[8];
 
-    jdate = getJ2000Date(date);
-    t_timeset = millis();
+    ref_t = millis();
+    ref_jd = getJ2000Date(date);
+    ref_lst = getLST(ref_jd, location);
+    synced = false;
 
     Serial.write('#');
+}
+
+void cmdGetTime(char *cmd)
+{
+    Date date;
+    //TODO: this function is not implemented yet
+    dateFromJ2000(getCurrentJD(), &date);
+
+    Serial.write(date.hour);
+    Serial.write(date.min);
+    Serial.write(date.sec);
+    Serial.write(date.month);
+    Serial.write(date.day);
+    Serial.write(date.year % 2000);
+    Serial.write(date.offset);
+    Serial.write(date.dst);
+    Serial.write("#");
 }
 
 void cmdPassThrough(char *cmd)
@@ -334,7 +351,7 @@ void cmdPassThrough(char *cmd)
     char resp[8];
     uint8_t size;
 
-    if (scope.sendRawCommand(cmd, resp, &size) == 0) {
+    if (nexstar.sendRawCommand(cmd, resp, &size) == 0) {
         for (int i=0; i < size; i++) {
             Serial.write(resp[i]);
         }
@@ -396,18 +413,15 @@ void cmdGetAbsPosition(char *cmd)
     Serial.write(tmp);
 }
 
-void cmdDebugLST(char *cmd)
+void cmdDebug1(char *cmd)
 {
-    double jd = jdate + (double)(millis() - t_timeset)/(1000.0*60*60*24);
-    double lst = getLST(jd, location);
-
-    Serial.print(lst, 6);
+    Serial.print(getCurrentLST(), 6);
     Serial.print('#');
 }
 
-void cmdDebugJulianTime(char *cmd)
+void cmdDebug2(char *cmd)
 {
-    Serial.print(jdate, 6);
+    Serial.print(getLST(getCurrentJD(), location), 6);
     Serial.print('#');
 }
 
@@ -446,9 +460,9 @@ void setup()
     sCmd.addCommand('K', 2, cmdEcho);
 
     // custom commands
-    sCmd.addCommand('U', 1, cmdGetAbsPosition);
-    sCmd.addCommand('d', 1, cmdDebugLST);
-    sCmd.addCommand('j', 1, cmdDebugJulianTime);
+    //sCmd.addCommand('U', 1, cmdGetAbsPosition);
+    sCmd.addCommand('d', 1, cmdDebug1);
+    sCmd.addCommand('D', 1, cmdDebug2);
 
     //sCmd.addCommand('J', 1, cmdAlignmentComplete);
     sCmd.addCommand('x', 1, cmdHibernate);
@@ -458,7 +472,9 @@ void setup()
     pinMode(LED_BUILTIN, OUTPUT);
 
     Serial.begin(BAUDRATE);
-    scope.init();
+    nexstar.init();
+
+    // TODO: Read the location from EEPROM
 }
 
 // Check if both motors have reached their target position
@@ -466,8 +482,8 @@ bool slewDone()
 {
     bool ra_done, dec_done;
 
-    scope.slewDone(DEV_RA, &ra_done);
-    scope.slewDone(DEV_DEC, &dec_done);
+    nexstar.slewDone(DEV_RA, &ra_done);
+    nexstar.slewDone(DEV_DEC, &dec_done);
     return ra_done && dec_done;
 }
 
@@ -538,5 +554,5 @@ void loop()
 {
     sCmd.readSerial();
     updateFSM();
-    scope.run();
+    nexstar.run();
 }

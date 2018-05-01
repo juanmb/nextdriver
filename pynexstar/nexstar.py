@@ -187,23 +187,34 @@ class NexStar(object):
         ret = self.send_packet('j', 12)
         return float(ret[:-1])
 
-    def get_sidereal_time(self):
+    def get_debug1(self):
         ret = self.send_packet('d', 9)
+        return float(ret[:-1])
+
+    def get_debug2(self):
+        ret = self.send_packet('D', 9)
         return float(ret[:-1])
 
 
 if __name__ == '__main__':
-    nex = NexStar('/dev/ttyUSB0', False)
+    nex = NexStar('/dev/ttyACM0', False)
     while nex.echo('x') != 'x':
         pass
+
+    nex.set_time(time.strftime('%Y/%m/%d %H:%M:%S'))
 
     print "Version:\t", nex.get_version()
     #print "Variant:\t", nex.get_variant()
     print "Model:\t", nex.get_model()
     print "Dec version:\t", nex.get_device_version(DEC_DEV)
     print "RA version:\t", nex.get_device_version(RA_DEV)
+    print "Time:\t", nex.get_time()
 
-    nex.sync_eq_coords(1.5, 0.3, precise=True)
+    for i in range(20):
+        print nex.get_debug1(), nex.get_debug2()
+        time.sleep(5)
+
+    #nex.sync_eq_coords(1.5, 0.3, precise=True)
 
     # nex.set_tracking_mode(0)
     # print "Tracking mode:", nex.get_tracking_mode()
