@@ -7,11 +7,11 @@
 # Source code can be downloaded from:
 # 	https://github.com/sudar/Arduino-Makefile
 
-BOARD_TAG    = nano
+BOARD_TAG    = uno
 BOARD_SUB    = atmega328
-ARDUINO_LIBS = SoftwareSerial EEPROM AstroLib
+ARDUINO_LIBS = SoftwareSerial EEPROM AstroLib AccelStepper
 ARDUINO_SKETCHBOOK = .
-ARDUINO_PORT = /dev/ttyUSB0
+ARDUINO_PORT = /dev/ttyACM0
 
 include /usr/share/arduino/Arduino.mk
 

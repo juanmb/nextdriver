@@ -10,8 +10,8 @@
 #include <SoftwareSerial.h>
 #include "serial_command.h"
 #include "nexstar_aux.h"
+#include "nexstar_stepper.h"
 #include "AstroLib.h"
-
 
 #define VERSION_MAJOR 4
 #define VERSION_MINOR 21
@@ -48,7 +48,8 @@ uint32_t t_sync = 0;
 EqCoords target = {0};
 
 SerialCommand sCmd;
-NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
+//NexStarAux scope(AUX_RX, AUX_TX, AUX_SELECT);
+NexStarStepper scope;
 
 
 // Convert nexstar angle format to radians
@@ -333,7 +334,7 @@ void cmdPassThrough(char *cmd)
     char resp[8];
     uint8_t size;
 
-    if (scope.sendPassThrough(cmd, resp, &size) == 0) {
+    if (scope.sendRawCommand(cmd, resp, &size) == 0) {
         for (int i=0; i < size; i++) {
             Serial.write(resp[i]);
         }
@@ -494,10 +495,10 @@ void updateFSM()
                 if (isClose()) {
                     gotoEqCoords(target, true);
                     state = ST_GOING_SLOW;
-                } else {
-                    gotoEqCoords(target, false);
-                    state = ST_GOING_FAST;
+                    break;
                 }
+                gotoEqCoords(target, false);
+                state = ST_GOING_FAST;
             }
             break;
 
@@ -537,4 +538,5 @@ void loop()
 {
     sCmd.readSerial();
     updateFSM();
+    scope.run();
 }
