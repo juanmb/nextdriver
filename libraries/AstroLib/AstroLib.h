@@ -16,26 +16,26 @@ struct Date {
 
 // Location in radians
 struct Location {
-    double latitude;
-    double longitude;
+    float latitude;
+    float longitude;
 };
 
 // Horizontal coordinates in radians
 struct HorizCoords {
-    double az;
-    double alt;
+    float az;
+    float alt;
 };
 
 // Equatorial coordinates in radians
 struct EqCoords {
-    double ra;
-    double dec;
+    float ra;
+    float dec;
 };
 
 // Equatorial coordinates in radians, with hour angle instead of RA
 struct EqHACoords {
-    double ha;
-    double dec;
+    float ha;
+    float dec;
 };
 
 // Angle in sexagesimal format
@@ -46,16 +46,16 @@ struct SxAngle {
 	uint8_t sign;
 };
 
-double sx2rad(SxAngle sx);
-void rad2sx(double rad, SxAngle *sx);
+float sx2rad(SxAngle sx);
+void rad2sx(float rad, SxAngle *sx);
 void sx2string(SxAngle sx, char *buffer);
 
-double getJulianDate0(Date date);
-double getJulianDate(Date date);
-double getJ2000Date(Date date);
-double getGMST(double jd);
-double getLST(double jd, Location loc);
-void dateFromJ2000(double jd, Date *date);
+float getJulianDate0(Date date);
+float getJulianDate(Date date);
+float getJ2000Date(Date date);
+float getGMST(Date date);
+float getLST(Date date, Location loc);
+void dateFromJ2000(float jd, Date *date);
 
 void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor);
 void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq);

@@ -36,7 +36,7 @@ TestAngle angles[] = {
 struct TestDate {
     double jd;      // Julian date
     double gmst;    // Greenwich mean sidereal time
-    //double lst;     // Local sidereal time
+    //float lst;     // Local sidereal time
     Date date;
 };
 
@@ -95,7 +95,7 @@ TEST(AstroLib, TestJulianDate) {
         TestDate date = dates[i];
 
         ASSERT_NEAR(date.jd, getJulianDate(date.date), 0.000001);
-        ASSERT_DOUBLE_EQ(floor(date.jd - 0.5) + 0.5, getJulianDate0(date.date));
+        ASSERT_FLOAT_EQ(floor(date.jd - 0.5) + 0.5, getJulianDate0(date.date));
         ASSERT_NEAR(date.jd - 2451545.0, getJ2000Date(date.date), 0.000001);
     }
 }
@@ -104,8 +104,8 @@ TEST(AstroLib, TestSiderealTime) {
     for (int i=0; i<sizeof(dates)/sizeof(TestDate); i++) {
         TestDate date = dates[i];
 
-        double jd = date.jd - 2451545.0;
-        ASSERT_NEAR(date.gmst , getGMST(jd), 0.0001);
+        float jd = date.jd - 2451545.0;
+        ASSERT_NEAR(date.gmst , getGMST(date.date), 0.00014);
     }
 }
 
@@ -114,8 +114,8 @@ TEST(horizToEq, TestHorizToEq) {
     // Madrid:
     Location loc = {0.705404328965830, -0.06458321069102657};
     Date date = {2017, 12, 11, 22, 2, 33};
-    double jd = getJ2000Date(date);
-    double stime = getLST(jd, loc);
+    float jd = getJ2000Date(date);
+    float stime = getLST(jd, loc);
 
     for (int i=0; i<sizeof(stars)/sizeof(EqCoords); i++) {
         HorizCoords hc;

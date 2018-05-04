@@ -3,25 +3,25 @@
 #include "AstroLib.h"
 
 
-double sx2rad(SxAngle sx)
+float sx2rad(SxAngle sx)
 {
-    double rad = M_PI*((double)sx.deg + (double)sx.min/60.0 + (double)sx.sec/3600.0)/180.0;
+    float rad = M_PI*((float)sx.deg + (float)sx.min/60.0 + (float)sx.sec/3600.0)/180.0;
 
     if (sx.sign)
         return 2*M_PI - rad;
     return rad;
 }
 
-void rad2sx(double rad, SxAngle *sx)
+void rad2sx(float rad, SxAngle *sx)
 {
-    double deg = rad*180/M_PI;
+    float deg = rad*180/M_PI;
     if (deg > 180)
         deg = deg - 360;
 
     sx->sign = (deg < 0);
     deg = fabs(deg);
-    double min = 60*(deg - int(deg));
-    double sec = 60*(min - int(min));
+    float min = 60*(deg - int(deg));
+    float sec = 60*(min - int(min));
 
     sx->deg = (uint8_t)deg;
     sx->min = (uint8_t)min;
@@ -35,19 +35,19 @@ void sx2string(SxAngle sx, char *buffer)
         buffer[0] = '-';
 }
 
-inline double normalize2pi(double h)
+inline float normalize2pi(float h)
 {
     int ih = (int)(h/2/M_PI);
-    h = h - (double)ih*2*M_PI;
+    h = h - (float)ih*2*M_PI;
     return h < 0 ? h + 2*M_PI : h;
 }
 
-// Calculate the julian date of the noon of a given date
-double getJulianDate0(Date date)
+// Calculate the julian date of the midnight of a given date
+float getJulianDate0(Date date)
 {
-    double a, b, c, d;
-    double month = date.month;
-    double year = date.year;
+    float a, b, c, d;
+    float month = date.month;
+    float year = date.year;
 
     if (month < 3) {
         month += 12;
@@ -59,26 +59,24 @@ double getJulianDate0(Date date)
     c = (long)(365.25*(year + 4716));
     d = (long)(30.6001*(month + 1));
 
-    return (double)date.day + b + c + d - 1524.5;
+    return (float)date.day + b + c + d - 1524.5;
 }
 
-double getJulianDate(Date date)
+float getJulianDate(Date date)
 {
     // TODO: apply DST?
-    double h = ((double)date.hour - (double)date.offset +
-            (double)date.min/60 + (double)date.sec/3600);
+    float h = ((float)date.hour - (float)date.offset +
+            (float)date.min/60 + (float)date.sec/3600);
     return getJulianDate0(date) + h/24;
 }
 
-double getJ2000Date(Date date)
+float getJ2000Date(Date date)
 {
-    double h = ((double)date.hour - (double)date.offset +
-            (double)date.min/60 + (double)date.sec/3600);
-    return (getJulianDate0(date) - 2451545) + h/24;
+    return getJulianDate(date) - 2451545.0;
 }
 
 
-void dateFromJ2000(double jd, Date *date)
+void dateFromJ2000(float jd, Date *date)
 {
     //TODO
     date->year = 2017;
@@ -91,7 +89,7 @@ void dateFromJ2000(double jd, Date *date)
     date->dst = 0;
 
     /*
-    double q = jd + 0.5;
+    float q = jd + 0.5;
     int z = int(jd + 0.5);
 
     w = (int)((z - 1867216.25)/36524.25);
@@ -115,17 +113,21 @@ void dateFromJ2000(double jd, Date *date)
 // Calculate Greenwich Mean Sidereal Time in radians
 // given a J2000-based julian date
 // Reference: http://aa.usno.navy.mil/faq/docs/GAST.php
-double getGMST(double jd)
+float getGMST(Date date)
 {
-    double gmst = (18.697374558 + 24.0657098*jd)*M_PI/12;
+    long jdx = getJulianDate0(date) - 2451544.5;
+    float frac = ((float)date.hour - (float)date.offset +
+            (float)date.min/60 + (float)date.sec/3600)/24 - 0.5;
+
+    float gmst = 4.8949612127 + 0.0172027918*jdx + 6.3003880989849*frac;
     return normalize2pi(gmst);
 }
 
 // Calculate Local Sidereal Time in radians
 // given a J2000-based julian date
-double getLST(double jd, Location loc)
+float getLST(Date date, Location loc)
 {
-    double lst = getGMST(jd) + loc.longitude;
+    float lst = getGMST(date) + loc.longitude;
     return normalize2pi(lst);
 }
 
@@ -133,7 +135,7 @@ double getLST(double jd, Location loc)
 // Reference: http://www.geocities.jp/toshimi_taki/matrix/matrix.htm
 void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor)
 {
-    double x, y, z, x2, y2, z2;
+    float x, y, z, x2, y2, z2;
 
     // Convert to rectangular coordinates
     x = cos(-eq.ha)*cos(eq.dec);
@@ -141,7 +143,7 @@ void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor)
     z = sin(eq.dec);
 
     // Rotate the coordinate system along east-west axis
-    double pz = M_PI/2 - loc.latitude;
+    float pz = M_PI/2 - loc.latitude;
     x2 = x*cos(pz) - z*sin(pz);
     y2 = y;
     z2 = x*sin(pz) + z*cos(pz);
@@ -155,7 +157,7 @@ void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor)
 // Reference: http://www.geocities.jp/toshimi_taki/matrix/matrix.htm
 void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq)
 {
-    double x, y, z, x2, y2, z2;
+    float x, y, z, x2, y2, z2;
 
     // Convert to rectangular coordinates
     x = cos(M_PI - hor.az)*cos(hor.alt);
@@ -163,7 +165,7 @@ void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq)
     z = sin(hor.alt);
 
     // Rotate the coordinate system along east-west axis
-    double zp = loc.latitude - M_PI/2;
+    float zp = loc.latitude - M_PI/2;
     x2 = x*cos(zp) - z*sin(zp);
     y2 = y;
     z2 = x*sin(zp) + z*cos(zp);
