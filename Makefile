@@ -9,7 +9,7 @@
 
 BOARD_TAG    = uno
 BOARD_SUB    = atmega328
-ARDUINO_LIBS = SoftwareSerial EEPROM AstroLib AccelStepper
+ARDUINO_LIBS = SoftwareSerial EEPROM Time AstroLib AccelStepper
 ARDUINO_SKETCHBOOK = .
 ARDUINO_PORT = /dev/ttyACM0
 

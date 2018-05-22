@@ -2,17 +2,7 @@
 #define _AstroLib_h_
 
 #include <stdint.h>
-
-struct Date {
-    int year;
-    int month;
-    int day;
-    int hour;
-    int min;
-    int sec;
-    int offset;
-    int dst;
-};
+#include <TimeLib.h>
 
 // Location in radians
 struct Location {
@@ -50,12 +40,12 @@ float sx2rad(SxAngle sx);
 void rad2sx(float rad, SxAngle *sx);
 void sx2string(SxAngle sx, char *buffer);
 
-float getJulianDate0(Date date);
-float getJulianDate(Date date);
-float getJ2000Date(Date date);
-float getGMST(Date date);
-float getLST(Date date, Location loc);
-void dateFromJ2000(float jd, Date *date);
+float getJulianDate0(time_t t);
+float getJulianDate(time_t t);
+float getJ2000Date(time_t t);
+float getGMST(time_t t);
+float getLST(time_t t, Location loc);
+void dateFromJ2000(float jd, time_t *t);
 
 void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor);
 void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq);

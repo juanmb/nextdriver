@@ -8,6 +8,7 @@
 
 //#include <EEPROM.h>
 #include <SoftwareSerial.h>
+#include <TimeLib.h>
 #include "serial_command.h"
 #include "nexstar_aux.h"
 #include "nexstar_stepper.h"
@@ -24,6 +25,10 @@
 #define AUX_TX 7
 #define RA_POT_PIN A6
 #define DEC_POT_PIN A7
+
+#define abs(x) (((x) > 0) ? (x) : -(x))
+#define sign(x) (((x) > 0) ? 1 : -1)
+
 
 enum ScopeState {
     ST_IDLE,
@@ -54,16 +59,24 @@ NexStarStepper nexstar;
 
 
 // Get current Julian date
-static double getCurrentJD()
+//static double getCurrentJD()
+//{
+    //return ref_jd + (double)(now() - ref_t)/(24.0*60*60);
+//}
+
+// Normalize an angle in radians between -pi and pi
+double normalizeAngle(double h)
 {
-    return ref_jd + (double)(millis() - ref_t)/(1000.0*60*60*24);
+    int ih = (int)(h/2/M_PI);
+    h = h - (double)ih*2*M_PI;
+    return h > M_PI ? h - 2*M_PI: h;
 }
 
 // Obtain current Local Sidereal Time from last synced time
 // This is faster than performing the full calculation from JD & location
 // by calling getLST()
 static double getCurrentLST() {
-    return ref_lst + (millis() - ref_t)*2*M_PI/8.616e7;
+    return ref_lst + 2*M_PI*(double)(now() - ref_t)/(24.0*60*60);
 }
 
 // Convert nexstar angle format to radians
@@ -92,33 +105,42 @@ uint32_t rad2pnex(double rad)
 
 void getEqCoords(EqCoords *eq)
 {
-    uint32_t ha_pos, dec_pos;
-    nexstar.getPosition(DEV_RA, &ha_pos);
-    nexstar.getPosition(DEV_DEC, &dec_pos);
+    uint32_t int_ra_pos, int_dec_pos;
+    nexstar.getPosition(DEV_RA, &int_ra_pos);
+    nexstar.getPosition(DEV_DEC, &int_dec_pos);
+    double ra_pos = normalizeAngle(pnex2rad(int_ra_pos));
+    double dec_pos = normalizeAngle(pnex2rad(int_dec_pos));
 
-    eq->ra = getCurrentLST() - pnex2rad(ha_pos);
-    eq->dec = pnex2rad(dec_pos);
+    double ha = ra_pos + M_PI/2*sign(dec_pos);
+    double dec = M_PI/2 - abs(dec_pos);
+
+    eq->ra = getCurrentLST() - ha;
+    eq->dec = dec;
 }
 
 void getAzCoords(HorizCoords *hor)
 {
-    uint32_t ha_pos, dec_pos;
-    nexstar.getPosition(DEV_RA, &ha_pos);
-    nexstar.getPosition(DEV_DEC, &dec_pos);
+    uint32_t int_ra_pos, int_dec_pos;
+    nexstar.getPosition(DEV_RA, &int_ra_pos);
+    nexstar.getPosition(DEV_DEC, &int_dec_pos);
+    double ra_pos = normalizeAngle(pnex2rad(int_ra_pos));
+    double dec_pos = normalizeAngle(pnex2rad(int_dec_pos));
 
     EqHACoords eq;
-    eq.ha = pnex2rad(ha_pos);
-    eq.dec = pnex2rad(dec_pos);
+    eq.ha = ra_pos + M_PI/2*sign(dec_pos);
+    eq.dec = M_PI/2 - abs(dec_pos);
+
     eqToHoriz(location, eq, hor);
 }
 
 void setEqCoords(EqCoords eq)
 {
-    // compute the hour angle
-    double ha = getCurrentLST() - eq.ra;
+    double ha = normalizeAngle(getCurrentLST() - eq.ra);
+    double ra_pos = ha - M_PI/2*sign(ha);
+    double dec_pos = (M_PI/2 - eq.dec)*sign(ha);
 
-    nexstar.setPosition(DEV_RA, rad2pnex(ha));
-    nexstar.setPosition(DEV_DEC, rad2pnex(eq.dec));
+    nexstar.setPosition(DEV_RA, rad2pnex(ra_pos));
+    nexstar.setPosition(DEV_DEC, rad2pnex(dec_pos));
     synced = true;
 }
 
@@ -127,8 +149,12 @@ void gotoEqCoords(EqCoords eq, bool slow)
     if (!synced)
         return;
 
-    nexstar.gotoPosition(DEV_RA, slow, rad2pnex(getCurrentLST() - eq.ra));
-    nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(eq.dec));
+    double ha = normalizeAngle(getCurrentLST() - eq.ra);
+    double ra_pos = ha - M_PI/2*sign(ha);
+    double dec_pos = (M_PI/2 - eq.dec)*sign(ha);
+
+    nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ra_pos));
+    nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(dec_pos));
 }
 
 void stopMotors()
@@ -291,39 +317,47 @@ void cmdSetLocation(char *cmd)
         (uint8_t)cmd[1], (uint8_t)cmd[2],
         (uint8_t)cmd[3], (uint8_t)cmd[4]
     };
-    location.latitude = sx2rad(latitude);
 
     SxAngle longitude = {
         (uint8_t)cmd[5], (uint8_t)cmd[6],
         (uint8_t)cmd[7], (uint8_t)cmd[8]
     };
-    location.longitude = sx2rad(longitude);
 
-    ref_lst = getLST(getCurrentJD(), location);
-    synced = false;
+    float lat = sx2rad(latitude);
+    float lon = sx2rad(longitude);
 
-    // TODO: Store the location in EEPROM
-    //for (int i = 0; i < 8; i++) {
-        //EEPROM.write(i, cmd[i + 1]);
-    //}
+    if ((lat != location.latitude) || (lon != location.longitude)) {
+        location.latitude = sx2rad(latitude);
+        location.longitude = sx2rad(longitude);
+
+        ref_lst = getLST(now(), location);
+        synced = false;
+
+        // TODO: Store the location in EEPROM
+        //for (int i = 0; i < 8; i++) {
+            //EEPROM.write(i, cmd[i + 1]);
+        //}
+    }
+
     Serial.write('#');
 }
 
 void cmdSetTime(char *cmd)
 {
-    Date date;
-    date.hour = (int)cmd[1];
-    date.min = (int)cmd[2];
-    date.sec = (int)cmd[3];
-    date.month = (int)cmd[4];
-    date.day = (int)cmd[5];
-    date.year = 2000 + (int)cmd[6];
-    date.offset = (int)cmd[7];
-    date.dst = (int)cmd[8];
+    int hour = (int)cmd[1];
+    int min = (int)cmd[2];
+    int sec = (int)cmd[3];
+    int month = (int)cmd[4];
+    int day = (int)cmd[5];
+    int year = (int)cmd[6] + 2000;
+    int offset = (int)cmd[7];
+    //int dst = (int)cmd[8];
 
-    ref_t = millis();
-    ref_jd = getJ2000Date(date);
-    ref_lst = getLST(ref_jd, location);
+    setTime(hour, min, sec, day, month, year);
+    adjustTime(-offset*3600);
+
+    ref_t = now();
+    ref_lst = getLST(ref_t, location);
     synced = false;
 
     Serial.write('#');
@@ -331,18 +365,15 @@ void cmdSetTime(char *cmd)
 
 void cmdGetTime(char *cmd)
 {
-    Date date;
-    //TODO: this function is not implemented yet
-    dateFromJ2000(getCurrentJD(), &date);
-
-    Serial.write(date.hour);
-    Serial.write(date.min);
-    Serial.write(date.sec);
-    Serial.write(date.month);
-    Serial.write(date.day);
-    Serial.write(date.year % 2000);
-    Serial.write(date.offset);
-    Serial.write(date.dst);
+    time_t t = now();
+    Serial.write(hour(t));
+    Serial.write(minute(t));
+    Serial.write(second(t));
+    Serial.write(month(t));
+    Serial.write(day(t));
+    Serial.write(year(t) % 2000);
+    Serial.write(0);
+    Serial.write(0);
     Serial.write("#");
 }
 
@@ -415,13 +446,15 @@ void cmdGetAbsPosition(char *cmd)
 
 void cmdDebug1(char *cmd)
 {
-    Serial.print(getCurrentLST(), 6);
+    uint32_t ha_pos;
+    nexstar.getPosition(DEV_RA, &ha_pos);
+    Serial.print(pnex2rad(ha_pos), 6);
     Serial.print('#');
 }
 
 void cmdDebug2(char *cmd)
 {
-    Serial.print(getLST(getCurrentJD(), location), 6);
+    Serial.print(getCurrentLST(), 6);
     Serial.print('#');
 }
 

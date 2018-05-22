@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
 #include "AstroLib.h"
 
 
@@ -43,50 +44,49 @@ inline float normalize2pi(float h)
 }
 
 // Calculate the julian date of the midnight of a given date
-float getJulianDate0(Date date)
+float getJulianDate0(time_t t)
 {
     float a, b, c, d;
-    float month = date.month;
-    float year = date.year;
+    float mon = month(t);
+    float yr = year(t);
 
-    if (month < 3) {
-        month += 12;
-        year -= 1;
+    if (mon < 3) {
+        mon += 12;
+        yr -= 1;
     }
 
-    a = (long)(year/100);
+    a = (long)(yr/100);
     b = 2 - a + (long)(a/4);
-    c = (long)(365.25*(year + 4716));
-    d = (long)(30.6001*(month + 1));
+    c = (long)(365.25*(yr + 4716));
+    d = (long)(30.6001*(mon + 1));
 
-    return (float)date.day + b + c + d - 1524.5;
+    return (float)day(t) + b + c + d - 1524.5;
 }
 
-float getJulianDate(Date date)
+float getJulianDate(time_t t)
 {
-    // TODO: apply DST?
-    float h = ((float)date.hour - (float)date.offset +
-            (float)date.min/60 + (float)date.sec/3600);
-    return getJulianDate0(date) + h/24;
+    float h = ((float)hour(t) + (float)minute(t)/60 + (float)second(t)/3600);
+    return getJulianDate0(t) + h/24;
 }
 
-float getJ2000Date(Date date)
+float getJ2000Date(time_t t)
 {
-    return getJulianDate(date) - 2451545.0;
+    return getJulianDate(t) - 2451545.0;
 }
 
 
-void dateFromJ2000(float jd, Date *date)
+void dateFromJ2000(float jd, time_t *t)
 {
     //TODO
-    date->year = 2017;
-    date->month = 12;
-    date->day = 16;
-    date->hour = 11;
-    date->min = 58;
-    date->sec = 35;
-    date->offset = 0;
-    date->dst = 0;
+
+    tmElements_t tm;
+    tm.Year = 2017;
+    tm.Month = 12;
+    tm.Day = 16;
+    tm.Hour = 11;
+    tm.Minute = 58;
+    tm.Second = 35;
+    *t = makeTime(tm);
 
     /*
     float q = jd + 0.5;
@@ -99,25 +99,25 @@ void dateFromJ2000(float jd, Date *date)
     e = (int)((b - d)/30.6001);
     f = 30.6001*e;
 
-    date->day = b - d - f + q - z;
-    date->month = e - 1;
-    if (date->month > 13)
-        date->month -= 12;
+    tm.Day = b - d - f + q - z;
+    tm.Month = e - 1;
+    if (tm.Month > 13)
+        tm.Month -= 12;
 
-    date->year = c - 4715;
-    if (date->month < 3)
-        date->year -= 1;
+    tm.Year = c - 4715;
+    if (tm.Month < 3)
+        tm.Year -= 1;
     */
 }
 
 // Calculate Greenwich Mean Sidereal Time in radians
 // given a J2000-based julian date
 // Reference: http://aa.usno.navy.mil/faq/docs/GAST.php
-float getGMST(Date date)
+float getGMST(time_t t)
 {
-    long jdx = getJulianDate0(date) - 2451544.5;
-    float frac = ((float)date.hour - (float)date.offset +
-            (float)date.min/60 + (float)date.sec/3600)/24 - 0.5;
+    long jdx = getJulianDate0(t) - 2451544.5;
+    float frac = ((float)hour(t) + (float)minute(t)/60 +
+            (float)second(t)/3600)/24 - 0.5;
 
     float gmst = 4.8949612127 + 0.0172027918*jdx + 6.3003880989849*frac;
     return normalize2pi(gmst);
@@ -125,9 +125,9 @@ float getGMST(Date date)
 
 // Calculate Local Sidereal Time in radians
 // given a J2000-based julian date
-float getLST(Date date, Location loc)
+float getLST(time_t t, Location loc)
 {
-    float lst = getGMST(date) + loc.longitude;
+    float lst = getGMST(t) + loc.longitude;
     return normalize2pi(lst);
 }
 

@@ -202,6 +202,7 @@ if __name__ == '__main__':
         pass
 
     nex.set_time(time.strftime('%Y/%m/%d %H:%M:%S'))
+    nex.set_location(-5.658*pi/180, 43.540*pi/180)
 
     print "Version:\t", nex.get_version()
     #print "Variant:\t", nex.get_variant()
@@ -210,9 +211,11 @@ if __name__ == '__main__':
     print "RA version:\t", nex.get_device_version(RA_DEV)
     print "Time:\t", nex.get_time()
 
+    print nex.get_eq_coords(precise=True)
+
     for i in range(20):
         print nex.get_debug1(), nex.get_debug2()
-        time.sleep(5)
+        time.sleep(2)
 
     #nex.sync_eq_coords(1.5, 0.3, precise=True)
 
