@@ -91,16 +91,12 @@ int NexStarStepper::getPosition(uint8_t dest, uint32_t *pos)
     return 0;
 }
 
-// Obtain the relative distance between current and target positions
-long getDiff(long current, long target)
+// Obtain the relative distance for travelling to the target position
+long getDiff(long cur, long tgt)
 {
-    long diff = target - current;
-
-    if (diff > USTEPS_REV/2)
-        return diff - USTEPS_REV;
-    else if (diff < -USTEPS_REV/2)
-        return diff + USTEPS_REV;
-    return diff;
+    cur = (cur < USTEPS_REV/2) ? cur : cur - USTEPS_REV;
+    tgt = (tgt < USTEPS_REV/2) ? tgt : tgt - USTEPS_REV;
+    return tgt - cur;
 }
 
 int NexStarStepper::gotoPosition(uint8_t dest, bool slow, uint32_t pos)
