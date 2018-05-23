@@ -72,6 +72,13 @@ double normalizeAngle(double h)
     return h > M_PI ? h - 2*M_PI: h;
 }
 
+double normalizeAngle2pi(double h)
+{
+    int ih = (int)(h/2/M_PI);
+    h = h - (double)ih*2*M_PI;
+    return h < 0 ? h + 2*M_PI : h;
+}
+
 // Obtain current Local Sidereal Time from last synced time
 // This is faster than performing the full calculation from JD & location
 // by calling getLST()
@@ -114,7 +121,7 @@ void getEqCoords(EqCoords *eq)
     double ha = ra_pos + M_PI/2*sign(dec_pos);
     double dec = M_PI/2 - abs(dec_pos);
 
-    eq->ra = getCurrentLST() - ha;
+    eq->ra = normalizeAngle2pi(getCurrentLST() - ha);
     eq->dec = dec;
 }
 
@@ -215,19 +222,33 @@ void cmdSyncEqCoords(char *cmd)
 
 void cmdGotoEqCoords(char *cmd)
 {
+    EqCoords eq;
+
     if (cmd[0] == 'R') {
         uint16_t ra, dec;
         sscanf(cmd + 1, "%4x,%4x", &ra, &dec);
-        target.ra = nex2rad(ra);
-        target.dec = nex2rad(dec);
+        eq.ra = nex2rad(ra);
+        eq.dec = nex2rad(dec);
     } else {
         uint32_t ra, dec;
         sscanf(cmd + 1, "%8lx,%8lx", &ra, &dec);
-        target.ra = pnex2rad(ra);
-        target.dec = pnex2rad(dec);
+        eq.ra = pnex2rad(ra);
+        eq.dec = pnex2rad(dec);
     }
 
-    event = EV_GOTO;
+    // Obtain the horizontal coordinates of the target
+    EqHACoords eqHA;
+    HorizCoords hor;
+    eqHA.ha = getCurrentLST() - eq.ra;
+    eqHA.dec = eq.dec;
+    eqToHoriz(location, eqHA, &hor);
+
+    // If target is above the horizon, go
+    if (hor.alt >= 0) {
+        target.ra = eq.ra;
+        target.dec = eq.dec;
+        event = EV_GOTO;
+    }
     Serial.write('#');
 }
 
@@ -247,12 +268,15 @@ void cmdGotoAzCoords(char *cmd)
         hor.alt = pnex2rad(alt);
     }
 
-    EqHACoords eq;
-    horizToEq(location, hor, &eq);
-    target.ra = getCurrentLST() - eq.ha;
-    target.dec = eq.dec;
+    // If target is above the horizon, go
+    if (hor.alt >= 0) {
+        EqHACoords eq;
+        horizToEq(location, hor, &eq);
+        target.ra = getCurrentLST() - eq.ha;
+        target.dec = eq.dec;
 
-    event = EV_GOTO;
+        event = EV_GOTO;
+    }
     Serial.write('#');
 }
 
