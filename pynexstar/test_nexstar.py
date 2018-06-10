@@ -3,7 +3,7 @@ import ephem
 import unittest
 from nexstar import NexStar, RA_DEV, DEC_DEV
 
-PORT = '/dev/ttyUSB0'
+PORT = '/dev/ttyACM0'
 
 
 class TestNexStar(unittest.TestCase):

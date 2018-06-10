@@ -19,12 +19,11 @@
 #define MOUNT_MODEL 10  // GT
 #define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
+#define GO_BELOW_HORIZON 1
 
 #define AUX_SELECT 5
 #define AUX_RX 6
 #define AUX_TX 7
-#define RA_POT_PIN A6
-#define DEC_POT_PIN A7
 
 #define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
@@ -53,6 +52,7 @@ double ref_jd = 0.0;     // Last synced julian date refered to J2000
 bool synced = false;
 EqCoords target = {0};
 
+
 SerialCommand sCmd;
 //NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
 NexStarStepper nexstar;
@@ -64,19 +64,20 @@ NexStarStepper nexstar;
     //return ref_jd + (double)(now() - ref_t)/(24.0*60*60);
 //}
 
-// Normalize an angle in radians between -pi and pi
-double normalizeAngle(double h)
-{
-    int ih = (int)(h/2/M_PI);
-    h = h - (double)ih*2*M_PI;
-    return h > M_PI ? h - 2*M_PI: h;
-}
-
 double normalizeAngle2pi(double h)
 {
     int ih = (int)(h/2/M_PI);
     h = h - (double)ih*2*M_PI;
     return h < 0 ? h + 2*M_PI : h;
+}
+
+// Normalize an angle in radians between -pi and pi
+double normalizeAngle(double h)
+{
+    h = normalizeAngle2pi(h);
+    int ih = (int)(h/2/M_PI);
+    h = h - (double)ih*2*M_PI;
+    return h > M_PI ? h - 2*M_PI: h;
 }
 
 // Obtain current Local Sidereal Time from last synced time
@@ -110,6 +111,12 @@ uint32_t rad2pnex(double rad)
     return (uint32_t)(rad * 0x100000000 / (2*M_PI));
 }
 
+void stopMotors()
+{
+    nexstar.move(DEV_RA, 0, 0);
+    nexstar.move(DEV_DEC, 0, 0);
+}
+
 void getEqCoords(EqCoords *eq)
 {
     uint32_t int_ra_pos, int_dec_pos;
@@ -117,6 +124,10 @@ void getEqCoords(EqCoords *eq)
     nexstar.getPosition(DEV_DEC, &int_dec_pos);
     double ra_pos = normalizeAngle(pnex2rad(int_ra_pos));
     double dec_pos = normalizeAngle(pnex2rad(int_dec_pos));
+
+    //if (abs(ra_pos) > M_PI) {
+        //stopMotors();
+    //}
 
     double ha = ra_pos + M_PI/2*sign(dec_pos);
     double dec = M_PI/2 - abs(dec_pos);
@@ -162,12 +173,6 @@ void gotoEqCoords(EqCoords eq, bool slow)
 
     nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ra_pos));
     nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(dec_pos));
-}
-
-void stopMotors()
-{
-    nexstar.move(DEV_RA, 0, 0);
-    nexstar.move(DEV_DEC, 0, 0);
 }
 
 void cmdGetEqCoords(char *cmd)
@@ -236,18 +241,24 @@ void cmdGotoEqCoords(char *cmd)
         eq.dec = pnex2rad(dec);
     }
 
-    // Obtain the horizontal coordinates of the target
-    EqHACoords eqHA;
-    HorizCoords hor;
-    eqHA.ha = getCurrentLST() - eq.ra;
-    eqHA.dec = eq.dec;
-    eqToHoriz(location, eqHA, &hor);
-
-    // If target is above the horizon, go
-    if (hor.alt >= 0) {
+    if (GO_BELOW_HORIZON) {
         target.ra = eq.ra;
         target.dec = eq.dec;
         event = EV_GOTO;
+    } else {
+        // Obtain the horizontal coordinates of the target
+        EqHACoords eqHA;
+        HorizCoords hor;
+        eqHA.ha = getCurrentLST() - eq.ra;
+        eqHA.dec = eq.dec;
+        eqToHoriz(location, eqHA, &hor);
+
+        // If target is above the horizon, go
+        if (hor.alt >= 0) {
+            target.ra = eq.ra;
+            target.dec = eq.dec;
+            event = EV_GOTO;
+        }
     }
     Serial.write('#');
 }
@@ -456,29 +467,29 @@ void cmdWakeup(char *cmd)
     Serial.write('#');
 }
 
-// Read the absolute position of the two axes using two potentiometers.
-// The returned position is the raw 10-bits value reading from the ADC.
-void cmdGetAbsPosition(char *cmd)
-{
-    int axis1_pos = analogRead(RA_POT_PIN);
-    int axis2_pos = analogRead(DEC_POT_PIN);
-
-    char tmp[11];
-    sprintf(tmp, "%04X,%04X#", axis1_pos, axis2_pos);
-    Serial.write(tmp);
-}
-
 void cmdDebug1(char *cmd)
 {
-    uint32_t ha_pos;
+    // return axis positions
+    uint32_t ha_pos, dec_pos;
     nexstar.getPosition(DEV_RA, &ha_pos);
+    nexstar.getPosition(DEV_DEC, &dec_pos);
+
     Serial.print(pnex2rad(ha_pos), 6);
+    Serial.print(',');
+    Serial.print(pnex2rad(dec_pos), 6);
     Serial.print('#');
 }
 
 void cmdDebug2(char *cmd)
 {
     Serial.print(getCurrentLST(), 6);
+    Serial.print('#');
+}
+
+void cmdDebug3(char *cmd)
+{
+    // return longitude
+    Serial.print(location.longitude, 6);
     Serial.print('#');
 }
 
@@ -517,9 +528,9 @@ void setup()
     sCmd.addCommand('K', 2, cmdEcho);
 
     // custom commands
-    //sCmd.addCommand('U', 1, cmdGetAbsPosition);
     sCmd.addCommand('d', 1, cmdDebug1);
     sCmd.addCommand('D', 1, cmdDebug2);
+    sCmd.addCommand('?', 1, cmdDebug3);
 
     //sCmd.addCommand('J', 1, cmdAlignmentComplete);
     sCmd.addCommand('x', 1, cmdHibernate);
@@ -579,8 +590,8 @@ void updateFSM()
             if (event == EV_ABORT) {
                 stopMotors();
                 state = ST_IDLE;
-            } else if (millis() - t_timer > 1000) {
-                // Every second, check if we are close to the target
+            } else if (millis() - t_timer > 100) {
+                // Every 0.1 seconds, check if we are close to the target
                 t_timer = millis();
 
                 if (slewDone()) {
@@ -594,8 +605,8 @@ void updateFSM()
             if (event == EV_ABORT) {
                 stopMotors();
                 state = ST_IDLE;
-            } else if (millis() - t_timer > 1000) {
-                // Every second, check if slew is done
+            } else if (millis() - t_timer > 100) {
+                // Every 0.1 seconds, check if slew is done
                 t_timer = millis();
 
                 if (slewDone())

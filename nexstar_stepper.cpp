@@ -17,10 +17,10 @@
 #define STEPS 200
 #define MICROSTEPS 16
 #define USTEPS_REV (GEAR_RATIO*STEPS*MICROSTEPS) // microsteps per revolution
-#define POS_FACTOR (0x100000000/USTEPS_REV)
+#define POS_FACTOR (0x100000000L/USTEPS_REV)
 
-#define GOTO_SPEED 500
-#define ACCEL 500
+#define GOTO_SPEED 800
+#define ACCEL 800
 
 // CNC Shield pins
 #define XSTEP 2
@@ -36,11 +36,8 @@
 #define SPINDLE_ENABLE 12
 #define SPINDLE_DIR 13
 
-// Pin for the photo diode -- Map to ZSTEP
+// Photodiode pin
 #define PHOTO_PIN ZSTEP
-
-// Modulus operator
-#define MOD(a, b) ((((a) % (b)) + (b)) % (b))
 
 
 NexStarStepper::NexStarStepper(void) :
@@ -133,9 +130,6 @@ int NexStarStepper::slewDone(uint8_t dest, bool *done)
     AccelStepper *motor = (dest == DEV_AZ) ? &azMotor : &altMotor;
 
     *done = !motor->isRunning();
-
-    //if (*done)
-        //digitalWrite(ENABLE, HIGH);
     return 0;
 }
 

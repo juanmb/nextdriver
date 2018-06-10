@@ -22,11 +22,18 @@ def nex2rad(angle, precise=False):
     return angle*2*pi/max_value
 
 
+def normalize_angle(h):
+    ih = int(h/2/pi)
+    h = h - ih*2*pi
+    return h + 2*pi if h < 0 else h
+
+
 def rad2nex(angle, precise=False):
+    angle = normalize_angle(angle)
     max_value = 0x100000000 if precise else 0x10000
     if angle < 0:
         angle += 2*pi
-    return angle*max_value/(2*pi)
+    return int(angle*max_value/(2*pi))
 
 
 def normalize_dec(angle):
@@ -119,6 +126,7 @@ class NexStar(object):
 
     def goto_eq_coords(self, ra, dec, precise=False):
         coords = rad2nex(ra, precise), rad2nex(dec, precise)
+        print "Goto eq:", ra, dec, coords
         if precise:
             self.send_packet('r%08X,%08X' % coords, 1)
         else:
@@ -187,14 +195,18 @@ class NexStar(object):
         ret = self.send_packet('j', 12)
         return float(ret[:-1])
 
-    def get_debug1(self):
-        ret = self.send_packet('d', 9)
-        return float(ret[:-1])
+    def get_axis_pos(self):
+        ret = self.send_packet('d', 18)
+        ha_pos, dec_pos = ret[:-1].split(',')
+        return float(ha_pos), float(dec_pos)
 
-    def get_debug2(self):
+    def get_sidereal_time(self):
         ret = self.send_packet('D', 9)
         return float(ret[:-1])
 
+    def get_long(self):
+        ret = self.send_packet('?', 9)
+        return float(ret[:-1])
 
 if __name__ == '__main__':
     nex = NexStar('/dev/ttyACM0', False)
@@ -202,7 +214,7 @@ if __name__ == '__main__':
         pass
 
     nex.set_time(time.strftime('%Y/%m/%d %H:%M:%S'))
-    nex.set_location(-5.658*pi/180, 43.540*pi/180)
+    nex.set_location(43.540*pi/180, -5.658*pi/180)
 
     print "Version:\t", nex.get_version()
     #print "Variant:\t", nex.get_variant()
@@ -214,7 +226,7 @@ if __name__ == '__main__':
     print nex.get_eq_coords(precise=True)
 
     for i in range(20):
-        print nex.get_debug1(), nex.get_debug2()
+        print nex.get_debug1(), nex.get_sidereal_time()
         time.sleep(2)
 
     #nex.sync_eq_coords(1.5, 0.3, precise=True)
