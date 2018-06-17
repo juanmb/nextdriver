@@ -31,6 +31,7 @@
 
 enum ScopeState {
     ST_IDLE,
+    ST_MERIDIAN_FLIP,
     ST_GOING_FAST,
     ST_GOING_SLOW,
 };
@@ -54,8 +55,8 @@ EqCoords target = {0};
 
 
 SerialCommand sCmd;
-//NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
-NexStarStepper nexstar;
+NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
+//NexStarStepper nexstar;
 
 
 // Get current Julian date
@@ -567,6 +568,20 @@ bool isClose()
     return fmax(ra_diff, dec_diff) < M_PI/18;
 }
 
+// Check if a meridian flip is required
+bool checkMeridian()
+{
+    uint32_t int_ra_pos;
+    double curr, ha, tgt;
+    nexstar.getPosition(DEV_RA, &int_ra_pos);
+    curr = normalizeAngle(pnex2rad(int_ra_pos));
+    ha = normalizeAngle(getCurrentLST() - target.ra);
+    tgt = normalizeAngle(ha - M_PI/2*sign(ha));
+
+    // A meridian flip is required if both angles have different sign
+    return curr*tgt < 0;
+}
+
 // Update the scope status with a simple state machine
 void updateFSM()
 {
@@ -576,13 +591,32 @@ void updateFSM()
         case ST_IDLE:
             if (event == EV_GOTO) {
                 t_timer = millis();
-                if (isClose()) {
-                    gotoEqCoords(target, true);
-                    state = ST_GOING_SLOW;
+                if (checkMeridian()) {
+                    // go to the pole before flipping
+                    nexstar.gotoPosition(DEV_RA, 0, 0);
+                    nexstar.gotoPosition(DEV_DEC, 0, 0);
+                    state = ST_MERIDIAN_FLIP;
                     break;
                 }
-                gotoEqCoords(target, false);
-                state = ST_GOING_FAST;
+                bool slow = isClose();
+                gotoEqCoords(target, slow);
+                state = slow ? ST_GOING_SLOW : ST_GOING_FAST;
+            }
+            break;
+
+        case ST_MERIDIAN_FLIP:
+            if (event == EV_ABORT) {
+                stopMotors();
+                state = ST_IDLE;
+            } else if (millis() - t_timer > 500) {
+                // Every 0.5 seconds, check if we are close to the target
+                t_timer = millis();
+
+                if (slewDone()) {
+                    bool slow = isClose();
+                    gotoEqCoords(target, slow);
+                    state = slow ? ST_GOING_SLOW : ST_GOING_FAST;
+                }
             }
             break;
 
@@ -590,8 +624,8 @@ void updateFSM()
             if (event == EV_ABORT) {
                 stopMotors();
                 state = ST_IDLE;
-            } else if (millis() - t_timer > 100) {
-                // Every 0.1 seconds, check if we are close to the target
+            } else if (millis() - t_timer > 500) {
+                // Every 0.5 seconds, check if we are close to the target
                 t_timer = millis();
 
                 if (slewDone()) {
