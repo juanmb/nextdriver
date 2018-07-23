@@ -1,3 +1,6 @@
 [submodule "libraries/AccelStepper"]
 	path = libraries/AccelStepper
 	url = https://github.com/waspinator/AccelStepper.git
+[submodule "libraries/Time"]
+	path = libraries/Time
+	url = https://github.com/PaulStoffregen/Time.git

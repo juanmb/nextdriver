@@ -19,7 +19,7 @@
 #define MOUNT_MODEL 10  // GT
 #define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
-#define GO_BELOW_HORIZON 1
+#define GO_BELOW_HORIZON
 
 #define AUX_SELECT 5
 #define AUX_RX 6
@@ -242,11 +242,11 @@ void cmdGotoEqCoords(char *cmd)
         eq.dec = pnex2rad(dec);
     }
 
-    if (GO_BELOW_HORIZON) {
+#ifdef GO_BELOW_HORIZON
         target.ra = eq.ra;
         target.dec = eq.dec;
         event = EV_GOTO;
-    } else {
+#else
         // Obtain the horizontal coordinates of the target
         EqHACoords eqHA;
         HorizCoords hor;
@@ -260,7 +260,7 @@ void cmdGotoEqCoords(char *cmd)
             target.dec = eq.dec;
             event = EV_GOTO;
         }
-    }
+#endif
     Serial.write('#');
 }
 
