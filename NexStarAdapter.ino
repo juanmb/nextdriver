@@ -20,10 +20,18 @@
 #define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
 #define GO_BELOW_HORIZON
+#define USE_HOME_SWITCHES
 
+// pin definitions
 #define AUX_SELECT 5
 #define AUX_RX 6
 #define AUX_TX 7
+#define HOME_RA_PIN 9
+#define HOME_DEC_PIN 10
+
+// home axis positions in radians
+#define HOME_RA_POS (M_PI/2)
+#define HOME_DEC_POS 0
 
 #define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
@@ -34,12 +42,16 @@ enum ScopeState {
     ST_MERIDIAN_FLIP,
     ST_GOING_FAST,
     ST_GOING_SLOW,
+    ST_HOMING_CW,
+    ST_HOMING_CCW,
+    ST_HOMING_CW_SLOW,
 };
 
 enum ScopeEvent {
     EV_NONE,
     EV_GOTO,
     EV_ABORT,
+    EV_HOME,
 };
 
 ScopeState state = ST_IDLE;
@@ -243,23 +255,23 @@ void cmdGotoEqCoords(char *cmd)
     }
 
 #ifdef GO_BELOW_HORIZON
+    target.ra = eq.ra;
+    target.dec = eq.dec;
+    event = EV_GOTO;
+#else
+    // Obtain the horizontal coordinates of the target
+    EqHACoords eqHA;
+    HorizCoords hor;
+    eqHA.ha = getCurrentLST() - eq.ra;
+    eqHA.dec = eq.dec;
+    eqToHoriz(location, eqHA, &hor);
+
+    // If target is above the horizon, go
+    if (hor.alt >= 0) {
         target.ra = eq.ra;
         target.dec = eq.dec;
         event = EV_GOTO;
-#else
-        // Obtain the horizontal coordinates of the target
-        EqHACoords eqHA;
-        HorizCoords hor;
-        eqHA.ha = getCurrentLST() - eq.ra;
-        eqHA.dec = eq.dec;
-        eqToHoriz(location, eqHA, &hor);
-
-        // If target is above the horizon, go
-        if (hor.alt >= 0) {
-            target.ra = eq.ra;
-            target.dec = eq.dec;
-            event = EV_GOTO;
-        }
+    }
 #endif
     Serial.write('#');
 }
@@ -280,14 +292,21 @@ void cmdGotoAzCoords(char *cmd)
         hor.alt = pnex2rad(alt);
     }
 
-    // If target is above the horizon, go
     if (hor.alt >= 0) {
+        // If target is above the horizon, go
         EqHACoords eq;
         horizToEq(location, hor, &eq);
         target.ra = getCurrentLST() - eq.ha;
         target.dec = eq.dec;
 
         event = EV_GOTO;
+
+#ifdef USE_HOME_SWITCHES
+        // Home the mount if az=0, alt=0
+        if (hor.az == 0 && hor.alt == 0) {
+            event = EV_HOME;
+        }
+#endif
     }
     Serial.write('#');
 }
@@ -539,6 +558,8 @@ void setup()
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(HOME_RA_PIN, INPUT);
+    pinMode(HOME_DEC_PIN, INPUT);
 
     Serial.begin(BAUDRATE);
     nexstar.init();
@@ -586,6 +607,14 @@ bool checkMeridian()
 void updateFSM()
 {
     static uint32_t t_timer;
+    static int ra_homed = 0, dec_homed = 0;
+
+    if (event == EV_ABORT) {
+        stopMotors();
+        state = ST_IDLE;
+        event = EV_NONE;
+        return;
+    }
 
     switch(state) {
         case ST_IDLE:
@@ -601,14 +630,17 @@ void updateFSM()
                 bool slow = isClose();
                 gotoEqCoords(target, slow);
                 state = slow ? ST_GOING_SLOW : ST_GOING_FAST;
+            } else if (event == EV_HOME) {
+                ra_homed = 0;
+                dec_homed = 0;
+                state = ST_HOMING_CW;
+                nexstar.move(DEV_RA, 0, 8);
+                nexstar.move(DEV_DEC, 0, 8);
             }
             break;
 
         case ST_MERIDIAN_FLIP:
-            if (event == EV_ABORT) {
-                stopMotors();
-                state = ST_IDLE;
-            } else if (millis() - t_timer > 500) {
+            if (millis() - t_timer > 500) {
                 // Every 0.5 seconds, check if we are close to the target
                 t_timer = millis();
 
@@ -621,10 +653,7 @@ void updateFSM()
             break;
 
         case ST_GOING_FAST:
-            if (event == EV_ABORT) {
-                stopMotors();
-                state = ST_IDLE;
-            } else if (millis() - t_timer > 500) {
+            if (millis() - t_timer > 500) {
                 // Every 0.5 seconds, check if we are close to the target
                 t_timer = millis();
 
@@ -636,15 +665,66 @@ void updateFSM()
             break;
 
         case ST_GOING_SLOW:
-            if (event == EV_ABORT) {
-                stopMotors();
-                state = ST_IDLE;
-            } else if (millis() - t_timer > 100) {
-                // Every 0.1 seconds, check if slew is done
+            if (millis() - t_timer > 250) {
+                // Every 0.25 seconds, check if slew is done
                 t_timer = millis();
 
                 if (slewDone())
                     state = ST_IDLE;
+            }
+            break;
+
+        case ST_HOMING_CW:
+            if (!ra_homed && digitalRead(HOME_RA_PIN)) {
+                nexstar.move(DEV_RA, 0, 0);
+                ra_homed = 1;
+            }
+            if (!dec_homed && digitalRead(HOME_DEC_PIN)) {
+                nexstar.move(DEV_DEC, 0, 0);
+                dec_homed = 1;
+            }
+
+            if (ra_homed && dec_homed) {
+                ra_homed = 0;
+                dec_homed = 0;
+                nexstar.move(DEV_RA, 1, 8);
+                nexstar.move(DEV_DEC, 1, 8);
+                state = ST_HOMING_CCW;
+            }
+            break;
+
+        case ST_HOMING_CCW:
+            if (!ra_homed && !digitalRead(HOME_RA_PIN)) {
+                nexstar.move(DEV_RA, 0, 0);
+                ra_homed = 1;
+            }
+            if (!dec_homed && !digitalRead(HOME_DEC_PIN)) {
+                nexstar.move(DEV_DEC, 0, 0);
+                dec_homed = 1;
+            }
+
+            if (ra_homed && dec_homed) {
+                ra_homed = 0;
+                dec_homed = 0;
+                nexstar.move(DEV_RA, 0, 2);
+                nexstar.move(DEV_DEC, 0, 2);
+                state = ST_HOMING_CW_SLOW;
+            }
+            break;
+
+        case ST_HOMING_CW_SLOW:
+            if (!ra_homed && digitalRead(HOME_RA_PIN)) {
+                nexstar.setPosition(DEV_RA, rad2pnex(HOME_RA_POS));
+                ra_homed = 1;
+            }
+            if (!dec_homed && digitalRead(HOME_DEC_PIN)) {
+                nexstar.setPosition(DEV_DEC, rad2pnex(HOME_DEC_POS));
+                dec_homed = 1;
+            }
+
+            if (ra_homed && dec_homed) {
+                stopMotors();
+                state = ST_IDLE;
             }
             break;
     };
