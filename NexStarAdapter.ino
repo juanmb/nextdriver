@@ -21,6 +21,7 @@
 #define BAUDRATE 9600
 #define GO_BELOW_HORIZON
 #define USE_HOME_SWITCHES
+#define MERIDIAN_MARGIN (M_PI/8)
 
 // pin definitions
 #define AUX_SELECT 5
@@ -130,7 +131,7 @@ void stopMotors()
     nexstar.move(DEV_DEC, 0, 0);
 }
 
-void getEqCoords(EqCoords *eq)
+void getHADec(EqHACoords *eq)
 {
     uint32_t int_ra_pos, int_dec_pos;
     nexstar.getPosition(DEV_RA, &int_ra_pos);
@@ -138,37 +139,38 @@ void getEqCoords(EqCoords *eq)
     double ra_pos = normalizeAngle(pnex2rad(int_ra_pos));
     double dec_pos = normalizeAngle(pnex2rad(int_dec_pos));
 
-    //if (abs(ra_pos) > M_PI) {
-        //stopMotors();
-    //}
+    eq->ha = ra_pos + M_PI/2*(sign(dec_pos) - 1);
+    eq->dec = M_PI/2 - abs(dec_pos);
+}
 
-    double ha = ra_pos + M_PI/2*sign(dec_pos);
-    double dec = M_PI/2 - abs(dec_pos);
+void eqToAxisPositions(EqCoords eq, double *ra_pos, double *dec_pos)
+{
+    double ha = normalizeAngle(getCurrentLST() - eq.ra);
+    *ra_pos = ha + M_PI/2*(1 - sign(ha));
+    *dec_pos = (M_PI/2 - eq.dec)*sign(ha);
+}
 
-    eq->ra = normalizeAngle2pi(getCurrentLST() - ha);
-    eq->dec = dec;
+void getEqCoords(EqCoords *eq)
+{
+    EqHACoords pos;
+    getHADec(&pos);
+
+    eq->ra = normalizeAngle2pi(getCurrentLST() - pos.ha);
+    eq->dec = pos.dec;
 }
 
 void getAzCoords(HorizCoords *hor)
 {
-    uint32_t int_ra_pos, int_dec_pos;
-    nexstar.getPosition(DEV_RA, &int_ra_pos);
-    nexstar.getPosition(DEV_DEC, &int_dec_pos);
-    double ra_pos = normalizeAngle(pnex2rad(int_ra_pos));
-    double dec_pos = normalizeAngle(pnex2rad(int_dec_pos));
+    EqHACoords pos;
+    getHADec(&pos);
 
-    EqHACoords eq;
-    eq.ha = ra_pos + M_PI/2*sign(dec_pos);
-    eq.dec = M_PI/2 - abs(dec_pos);
-
-    eqToHoriz(location, eq, hor);
+    eqToHoriz(location, pos, hor);
 }
 
 void setEqCoords(EqCoords eq)
 {
-    double ha = normalizeAngle(getCurrentLST() - eq.ra);
-    double ra_pos = ha - M_PI/2*sign(ha);
-    double dec_pos = (M_PI/2 - eq.dec)*sign(ha);
+    double ra_pos, dec_pos;
+    eqToAxisPositions(eq, &ra_pos, &dec_pos);
 
     nexstar.setPosition(DEV_RA, rad2pnex(ra_pos));
     nexstar.setPosition(DEV_DEC, rad2pnex(dec_pos));
@@ -180,9 +182,8 @@ void gotoEqCoords(EqCoords eq, bool slow)
     if (!synced)
         return;
 
-    double ha = normalizeAngle(getCurrentLST() - eq.ra);
-    double ra_pos = ha - M_PI/2*sign(ha);
-    double dec_pos = (M_PI/2 - eq.dec)*sign(ha);
+    double ra_pos, dec_pos;
+    eqToAxisPositions(eq, &ra_pos, &dec_pos);
 
     nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ra_pos));
     nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(dec_pos));
@@ -595,8 +596,9 @@ bool checkMeridian()
     uint32_t int_ra_pos;
     double curr, ha, tgt;
     nexstar.getPosition(DEV_RA, &int_ra_pos);
-    curr = normalizeAngle(pnex2rad(int_ra_pos));
-    ha = normalizeAngle(getCurrentLST() - target.ra);
+    curr = normalizeAngle(pnex2rad(int_ra_pos) - M_PI/2);
+
+    ha = normalizeAngle(getCurrentLST() - target.ra + MERIDIAN_MARGIN);
     tgt = normalizeAngle(ha - M_PI/2*sign(ha));
 
     // A meridian flip is required if both angles have different sign
