@@ -27,8 +27,8 @@
 #define AUX_SELECT 5
 #define AUX_RX 6
 #define AUX_TX 7
-#define HOME_RA_PIN 9
-#define HOME_DEC_PIN 10
+#define HOME_DEC_PIN A6
+#define HOME_RA_PIN A7
 
 // home axis positions in radians
 #define HOME_RA_POS (M_PI/2)
@@ -45,7 +45,8 @@ enum ScopeState {
     ST_GOING_SLOW,
     ST_HOMING_CW,
     ST_HOMING_CCW,
-    ST_HOMING_CW_SLOW,
+    ST_HOMING_SLOW1,
+    ST_HOMING_SLOW2,
 };
 
 enum ScopeEvent {
@@ -559,8 +560,6 @@ void setup()
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
-    pinMode(HOME_RA_PIN, INPUT);
-    pinMode(HOME_DEC_PIN, INPUT);
 
     Serial.begin(BAUDRATE);
     nexstar.init();
@@ -624,7 +623,7 @@ void updateFSM()
                 t_timer = millis();
                 if (checkMeridian()) {
                     // go to the pole before flipping
-                    nexstar.gotoPosition(DEV_RA, 0, 0);
+                    nexstar.gotoPosition(DEV_RA, 0, rad2pnex(M_PI/2));
                     nexstar.gotoPosition(DEV_DEC, 0, 0);
                     state = ST_MERIDIAN_FLIP;
                     break;
@@ -677,13 +676,14 @@ void updateFSM()
             break;
 
         case ST_HOMING_CW:
-            if (!ra_homed && digitalRead(HOME_RA_PIN)) {
-                nexstar.move(DEV_RA, 0, 0);
-                ra_homed = 1;
-            }
-            if (!dec_homed && digitalRead(HOME_DEC_PIN)) {
+            // Move CW each axis until the photodiode receives light
+            if (!dec_homed && (analogRead(HOME_DEC_PIN) < 512)) {
                 nexstar.move(DEV_DEC, 0, 0);
                 dec_homed = 1;
+            }
+            if (!ra_homed && (analogRead(HOME_RA_PIN) < 512)) {
+                nexstar.move(DEV_RA, 0, 0);
+                ra_homed = 1;
             }
 
             if (ra_homed && dec_homed) {
@@ -696,36 +696,59 @@ void updateFSM()
             break;
 
         case ST_HOMING_CCW:
-            if (!ra_homed && !digitalRead(HOME_RA_PIN)) {
-                nexstar.move(DEV_RA, 0, 0);
-                ra_homed = 1;
-            }
-            if (!dec_homed && !digitalRead(HOME_DEC_PIN)) {
+            // Move CCW each axis until the photodiode stops receiving light
+            if (!dec_homed && (analogRead(HOME_DEC_PIN) > 512)) {
                 nexstar.move(DEV_DEC, 0, 0);
                 dec_homed = 1;
+            }
+            if (!ra_homed && (analogRead(HOME_RA_PIN) > 512)) {
+                nexstar.move(DEV_RA, 0, 0);
+                ra_homed = 1;
             }
 
             if (ra_homed && dec_homed) {
                 ra_homed = 0;
                 dec_homed = 0;
-                nexstar.move(DEV_RA, 0, 2);
-                nexstar.move(DEV_DEC, 0, 2);
-                state = ST_HOMING_CW_SLOW;
+                nexstar.move(DEV_DEC, 0, 6);
+                nexstar.move(DEV_RA, 0, 6);
+                state = ST_HOMING_SLOW1;
             }
             break;
 
-        case ST_HOMING_CW_SLOW:
-            if (!ra_homed && digitalRead(HOME_RA_PIN)) {
-                nexstar.setPosition(DEV_RA, rad2pnex(HOME_RA_POS));
-                ra_homed = 1;
-            }
-            if (!dec_homed && digitalRead(HOME_DEC_PIN)) {
-                nexstar.setPosition(DEV_DEC, rad2pnex(HOME_DEC_POS));
+        case ST_HOMING_SLOW1:
+            // Move CCW each axis until the photodiode stops receiving light
+            if (!dec_homed && (analogRead(HOME_DEC_PIN) < 512)) {
+                nexstar.move(DEV_DEC, 0, 0);
                 dec_homed = 1;
+            }
+            if (!ra_homed && (analogRead(HOME_RA_PIN) < 512)) {
+                nexstar.move(DEV_RA, 0, 0);
+                ra_homed = 1;
             }
 
             if (ra_homed && dec_homed) {
-                stopMotors();
+                ra_homed = 0;
+                dec_homed = 0;
+                nexstar.move(DEV_DEC, 1, 4);
+                nexstar.move(DEV_RA, 1, 4);
+                state = ST_HOMING_SLOW2;
+            }
+            break;
+
+        case ST_HOMING_SLOW2:
+            if (!dec_homed && (analogRead(HOME_DEC_PIN) > 512)) {
+                nexstar.move(DEV_DEC, 0, 0);
+                nexstar.setPosition(DEV_DEC, rad2pnex(HOME_DEC_POS));
+                dec_homed = 1;
+            }
+            if (!ra_homed && (analogRead(HOME_RA_PIN > 512))) {
+                nexstar.move(DEV_RA, 0, 0);
+                nexstar.setPosition(DEV_RA, rad2pnex(HOME_RA_POS));
+                ra_homed = 1;
+            }
+
+            if (ra_homed && dec_homed) {
+                //stopMotors();
                 state = ST_IDLE;
             }
             break;
