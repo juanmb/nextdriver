@@ -22,29 +22,41 @@
 #define GO_BELOW_HORIZON
 #define USE_HOME_SWITCHES
 #define MERIDIAN_MARGIN (M_PI/8)
+//#define DEBUG
 
 // pin definitions
 #define AUX_SELECT 5
 #define AUX_RX 6
 #define AUX_TX 7
+#define DEBUG_TX 2
+//#define BUTTON 3
 #define HOME_DEC_PIN A6
 #define HOME_RA_PIN A7
 
-// home axis positions in radians
-#define HOME_RA_POS (M_PI/2)
-#define HOME_DEC_POS 0
+// Hour angle and declination of home position in radians
+#define HOME_HA (M_PI*(6 + 2.0/60 + 20.0/3600)/12)   // 6h 2m 20s
+#define HOME_DEC (M_PI*(71 + 12.0/60)/180)           // 71 12'
 
 #define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
 
+#define decHomeSensor() (analogRead(HOME_DEC_PIN) > 512) // returns true if blocked
+#define raHomeSensor() (analogRead(HOME_RA_PIN) > 512)   // returns true if blocked
+
+#ifdef DEBUG
+#define DEBUG_PRINT(str) debug.println(str)
+#else
+#define DEBUG_PRINT(str) do {} while(0)
+#endif
 
 enum ScopeState {
     ST_IDLE,
     ST_MERIDIAN_FLIP,
-    ST_GOING_FAST,
-    ST_GOING_SLOW,
-    ST_HOMING_CW,
-    ST_HOMING_CCW,
+    ST_SLEWING_FAST,
+    ST_SLEWING_SLOW,
+    ST_HOMING_DEC,
+    ST_HOMING_FAST1,
+    ST_HOMING_FAST2,
     ST_HOMING_SLOW1,
     ST_HOMING_SLOW2,
 };
@@ -54,6 +66,11 @@ enum ScopeEvent {
     EV_GOTO,
     EV_ABORT,
     EV_HOME,
+};
+
+struct AxisCoords {
+    float ra;
+    float dec;
 };
 
 ScopeState state = ST_IDLE;
@@ -72,6 +89,9 @@ SerialCommand sCmd;
 NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
 //NexStarStepper nexstar;
 
+#ifdef DEBUG
+SoftwareSerial debug(4, 2);
+#endif
 
 // Get current Julian date
 //static double getCurrentJD()
@@ -144,11 +164,18 @@ void getHADec(EqHACoords *eq)
     eq->dec = M_PI/2 - abs(dec_pos);
 }
 
-void eqToAxisPositions(EqCoords eq, double *ra_pos, double *dec_pos)
+// Convert local equatorial coordinates to axis coordinates
+void eqHAToAxisCoords(EqHACoords eq, double *ra_pos, double *dec_pos)
 {
-    double ha = normalizeAngle(getCurrentLST() - eq.ra);
-    *ra_pos = ha + M_PI/2*(1 - sign(ha));
-    *dec_pos = (M_PI/2 - eq.dec)*sign(ha);
+    *ra_pos = eq.ha + M_PI/2*(1 - sign(eq.ha));
+    *dec_pos = (M_PI/2 - eq.dec)*sign(eq.ha);
+}
+
+// Convert absolute equatorial coordinates to axis coordinates
+void eqToAxisCoords(EqCoords eq, double *ra_pos, double *dec_pos)
+{
+    EqHACoords eq2 = {normalizeAngle(getCurrentLST() - eq.ra), eq.dec};
+    eqHAToAxisCoords(eq2, ra_pos, dec_pos);
 }
 
 void getEqCoords(EqCoords *eq)
@@ -171,7 +198,17 @@ void getAzCoords(HorizCoords *hor)
 void setEqCoords(EqCoords eq)
 {
     double ra_pos, dec_pos;
-    eqToAxisPositions(eq, &ra_pos, &dec_pos);
+    eqToAxisCoords(eq, &ra_pos, &dec_pos);
+
+    nexstar.setPosition(DEV_RA, rad2pnex(ra_pos));
+    nexstar.setPosition(DEV_DEC, rad2pnex(dec_pos));
+    synced = true;
+}
+
+void setHACoords(EqHACoords eq)
+{
+    double ra_pos, dec_pos;
+    eqHAToAxisCoords(eq, &ra_pos, &dec_pos);
 
     nexstar.setPosition(DEV_RA, rad2pnex(ra_pos));
     nexstar.setPosition(DEV_DEC, rad2pnex(dec_pos));
@@ -184,7 +221,7 @@ void gotoEqCoords(EqCoords eq, bool slow)
         return;
 
     double ra_pos, dec_pos;
-    eqToAxisPositions(eq, &ra_pos, &dec_pos);
+    eqToAxisCoords(eq, &ra_pos, &dec_pos);
 
     nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ra_pos));
     nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(dec_pos));
@@ -560,7 +597,11 @@ void setup()
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
+    //pinMode(BUTTON, INPUT_PULLUP);
 
+#ifdef DEBUG
+    debug.begin(9600);
+#endif
     Serial.begin(BAUDRATE);
     nexstar.init();
 
@@ -609,11 +650,13 @@ void updateFSM()
 {
     static uint32_t t_timer;
     static int ra_homed = 0, dec_homed = 0;
+    static bool dec_homing_dir = 0;
 
     if (event == EV_ABORT) {
         stopMotors();
         state = ST_IDLE;
         event = EV_NONE;
+        DEBUG_PRINT("ST_IDLE");
         return;
     }
 
@@ -626,17 +669,18 @@ void updateFSM()
                     nexstar.gotoPosition(DEV_RA, 0, rad2pnex(M_PI/2));
                     nexstar.gotoPosition(DEV_DEC, 0, 0);
                     state = ST_MERIDIAN_FLIP;
+                    DEBUG_PRINT("ST_MERIDIAN_FLIP");
                     break;
                 }
                 bool slow = isClose();
                 gotoEqCoords(target, slow);
-                state = slow ? ST_GOING_SLOW : ST_GOING_FAST;
+                state = slow ? ST_SLEWING_SLOW : ST_SLEWING_FAST;
+                DEBUG_PRINT(slow ? "ST_SLEWING_SLOW" : "ST_SLEWING_FAST");
             } else if (event == EV_HOME) {
-                ra_homed = 0;
-                dec_homed = 0;
-                state = ST_HOMING_CW;
-                nexstar.move(DEV_RA, 0, 8);
-                nexstar.move(DEV_DEC, 0, 8);
+                dec_homing_dir = !decHomeSensor();
+                nexstar.move(DEV_DEC, dec_homing_dir, 9);
+                state = ST_HOMING_DEC;
+                DEBUG_PRINT("ST_HOMING_DEC");
             }
             break;
 
@@ -648,40 +692,56 @@ void updateFSM()
                 if (slewDone()) {
                     bool slow = isClose();
                     gotoEqCoords(target, slow);
-                    state = slow ? ST_GOING_SLOW : ST_GOING_FAST;
+                    state = slow ? ST_SLEWING_SLOW : ST_SLEWING_FAST;
+                    DEBUG_PRINT(slow ? "ST_SLEWING_SLOW" : "ST_SLEWING_FAST");
                 }
             }
             break;
 
-        case ST_GOING_FAST:
+        case ST_SLEWING_FAST:
             if (millis() - t_timer > 500) {
                 // Every 0.5 seconds, check if we are close to the target
                 t_timer = millis();
 
                 if (slewDone()) {
                     gotoEqCoords(target, true);
-                    state = ST_GOING_SLOW;
+                    state = ST_SLEWING_SLOW;
+                    DEBUG_PRINT("ST_SLEWING_SLOW");
                 }
             }
             break;
 
-        case ST_GOING_SLOW:
+        case ST_SLEWING_SLOW:
             if (millis() - t_timer > 250) {
                 // Every 0.25 seconds, check if slew is done
                 t_timer = millis();
 
-                if (slewDone())
+                if (slewDone()) {
                     state = ST_IDLE;
+                    DEBUG_PRINT("ST_IDLE");
+                }
             }
             break;
 
-        case ST_HOMING_CW:
+        case ST_HOMING_DEC:
+            // Move CW dec axis until the photodiode changes
+            if (dec_homing_dir == decHomeSensor()) {
+                nexstar.move(DEV_DEC, 0, 9);
+                nexstar.move(DEV_RA, 0, 9);
+                ra_homed = 0;
+                dec_homed = 0;
+                state = ST_HOMING_FAST1;
+                DEBUG_PRINT("ST_HOMING_FAST1");
+            }
+            break;
+
+        case ST_HOMING_FAST1:
             // Move CW each axis until the photodiode receives light
-            if (!dec_homed && (analogRead(HOME_DEC_PIN) < 512)) {
+            if (!dec_homed && !decHomeSensor()) {
                 nexstar.move(DEV_DEC, 0, 0);
                 dec_homed = 1;
             }
-            if (!ra_homed && (analogRead(HOME_RA_PIN) < 512)) {
+            if (!ra_homed && !raHomeSensor()) {
                 nexstar.move(DEV_RA, 0, 0);
                 ra_homed = 1;
             }
@@ -689,19 +749,20 @@ void updateFSM()
             if (ra_homed && dec_homed) {
                 ra_homed = 0;
                 dec_homed = 0;
-                nexstar.move(DEV_RA, 1, 8);
-                nexstar.move(DEV_DEC, 1, 8);
-                state = ST_HOMING_CCW;
+                nexstar.move(DEV_DEC, 1, 9);
+                nexstar.move(DEV_RA, 1, 9);
+                state = ST_HOMING_FAST2;
+                DEBUG_PRINT("ST_HOMING_FAST2");
             }
             break;
 
-        case ST_HOMING_CCW:
+        case ST_HOMING_FAST2:
             // Move CCW each axis until the photodiode stops receiving light
-            if (!dec_homed && (analogRead(HOME_DEC_PIN) > 512)) {
+            if (!dec_homed && decHomeSensor()) {
                 nexstar.move(DEV_DEC, 0, 0);
                 dec_homed = 1;
             }
-            if (!ra_homed && (analogRead(HOME_RA_PIN) > 512)) {
+            if (!ra_homed && raHomeSensor()) {
                 nexstar.move(DEV_RA, 0, 0);
                 ra_homed = 1;
             }
@@ -712,16 +773,17 @@ void updateFSM()
                 nexstar.move(DEV_DEC, 0, 6);
                 nexstar.move(DEV_RA, 0, 6);
                 state = ST_HOMING_SLOW1;
+                DEBUG_PRINT("ST_HOMING_SLOW1");
             }
             break;
 
         case ST_HOMING_SLOW1:
             // Move CCW each axis until the photodiode stops receiving light
-            if (!dec_homed && (analogRead(HOME_DEC_PIN) < 512)) {
+            if (!dec_homed && !decHomeSensor()) {
                 nexstar.move(DEV_DEC, 0, 0);
                 dec_homed = 1;
             }
-            if (!ra_homed && (analogRead(HOME_RA_PIN) < 512)) {
+            if (!ra_homed && !raHomeSensor()) {
                 nexstar.move(DEV_RA, 0, 0);
                 ra_homed = 1;
             }
@@ -732,24 +794,27 @@ void updateFSM()
                 nexstar.move(DEV_DEC, 1, 4);
                 nexstar.move(DEV_RA, 1, 4);
                 state = ST_HOMING_SLOW2;
+                DEBUG_PRINT("ST_HOMING_SLOW2");
             }
             break;
 
         case ST_HOMING_SLOW2:
-            if (!dec_homed && (analogRead(HOME_DEC_PIN) > 512)) {
+            if (!dec_homed && decHomeSensor()) {
                 nexstar.move(DEV_DEC, 0, 0);
-                nexstar.setPosition(DEV_DEC, rad2pnex(HOME_DEC_POS));
                 dec_homed = 1;
             }
-            if (!ra_homed && (analogRead(HOME_RA_PIN > 512))) {
+            if (!ra_homed && raHomeSensor()) {
                 nexstar.move(DEV_RA, 0, 0);
-                nexstar.setPosition(DEV_RA, rad2pnex(HOME_RA_POS));
                 ra_homed = 1;
             }
 
             if (ra_homed && dec_homed) {
                 //stopMotors();
+                EqHACoords eq = {HOME_HA, HOME_DEC};
+                setHACoords(eq);
+                synced = true;
                 state = ST_IDLE;
+                DEBUG_PRINT("ST_IDLE");
             }
             break;
     };
