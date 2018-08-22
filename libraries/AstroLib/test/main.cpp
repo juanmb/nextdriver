@@ -110,7 +110,7 @@ TEST(AstroLib, TestSiderealTime) {
 }
 
 /*
-TEST(horizToEq, TestHorizToEq) {
+TEST(horizToLocal, TestHorizToEq) {
     // Madrid:
     Location loc = {0.705404328965830, -0.06458321069102657};
     Date date = {2017, 12, 11, 22, 2, 33};
@@ -119,11 +119,11 @@ TEST(horizToEq, TestHorizToEq) {
 
     for (int i=0; i<sizeof(stars)/sizeof(EqCoords); i++) {
         HorizCoords hc;
-        eqToHoriz(stime, loc, stars[i], &hc);
+        localToHoriz(stime, loc, stars[i], &hc);
         //printf("%d\t%f\t%f\t%f\t%f\n", i, stars[i].ra, stars[i].dec, hc.az, hc.alt);
 
-        EqCoords eq;
-        horizToEq(stime, loc, hc, &eq);
+        LocalCoords eq;
+        horizToLocal(stime, loc, hc, &eq);
         printf("%d\t%f\t%f\t%f\t%f\n", i, stars[i].ra, stars[i].dec, eq.ra, eq.dec);
     }
 }

@@ -133,14 +133,14 @@ float getLST(time_t t, Location loc)
 
 // Convert equatorial to horizontal coordinates
 // Reference: http://www.geocities.jp/toshimi_taki/matrix/matrix.htm
-void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor)
+void localToHoriz(Location loc, LocalCoords lc, HorizCoords *hor)
 {
     float x, y, z, x2, y2, z2;
 
     // Convert to rectangular coordinates
-    x = cos(-eq.ha)*cos(eq.dec);
-    y = sin(-eq.ha)*cos(eq.dec);
-    z = sin(eq.dec);
+    x = cos(-lc.ha)*cos(lc.dec);
+    y = sin(-lc.ha)*cos(lc.dec);
+    z = sin(lc.dec);
 
     // Rotate the coordinate system along east-west axis
     float pz = M_PI/2 - loc.latitude;
@@ -155,7 +155,7 @@ void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor)
 
 // Convert horizontal to equatorial coordinates
 // Reference: http://www.geocities.jp/toshimi_taki/matrix/matrix.htm
-void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq)
+void horizToLocal(Location loc, HorizCoords hor, LocalCoords *lc)
 {
     float x, y, z, x2, y2, z2;
 
@@ -171,9 +171,9 @@ void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq)
     z2 = x*sin(zp) + z*cos(zp);
 
     // Convert to equatorial coordinates
-    eq->ha = -atan2(y2, x2);
-    eq->dec = asin(z2);
+    lc->ha = -atan2(y2, x2);
+    lc->dec = asin(z2);
 
-    if (eq->ha < 0)
-        eq->ha += 2*M_PI;
+    if (lc->ha < 0)
+        lc->ha += 2*M_PI;
 }

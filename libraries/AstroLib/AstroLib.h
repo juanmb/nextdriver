@@ -10,20 +10,20 @@ struct Location {
     float longitude;
 };
 
-// Horizontal coordinates in radians
+// Horizontal coordinates (Azimuth/altitude) in radians
 struct HorizCoords {
     float az;
     float alt;
 };
 
-// Equatorial coordinates in radians
+// Equatorial coordinates (RA/dec) in radians
 struct EqCoords {
     float ra;
     float dec;
 };
 
-// Equatorial coordinates in radians, with hour angle instead of RA
-struct EqHACoords {
+// Local coordinates (HA/dec) in radians
+struct LocalCoords {
     float ha;
     float dec;
 };
@@ -47,7 +47,7 @@ float getGMST(time_t t);
 float getLST(time_t t, Location loc);
 void dateFromJ2000(float jd, time_t *t);
 
-void eqToHoriz(Location loc, EqHACoords eq, HorizCoords *hor);
-void horizToEq(Location loc, HorizCoords hor, EqHACoords *eq);
+void localToHoriz(Location loc, LocalCoords lc, HorizCoords *hor);
+void horizToLocal(Location loc, HorizCoords hor, LocalCoords *lc);
 
 #endif

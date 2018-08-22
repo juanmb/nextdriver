@@ -1,5 +1,5 @@
 /******************************************************************
-    Author:     Juan Menendez Blanco    <juanmb@gmail.com>
+    Author: Juan Menendez <juanmb@gmail.com>
 
     This code is part of the NexStarAdapter project:
         https://github.com/juanmb/NexStarAdapter
@@ -20,8 +20,7 @@
 #define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
 #define GO_BELOW_HORIZON
-#define USE_HOME_SWITCHES
-#define MERIDIAN_MARGIN (M_PI/8)
+#define ENABLE_HOMING
 //#define DEBUG
 
 // pin definitions
@@ -34,6 +33,7 @@
 #define HOME_RA_PIN A7
 
 // Hour angle and declination of home position in radians
+// TODO: store home position in EEPROM
 #define HOME_HA (M_PI*(6 + 2.0/60 + 20.0/3600)/12)   // 6h 2m 20s
 #define HOME_DEC (M_PI*(71 + 12.0/60)/180)           // 71 12'
 
@@ -68,6 +68,11 @@ enum ScopeEvent {
     EV_HOME,
 };
 
+enum PierSide {
+    PIER_EAST,  // Telescope pointing to east (normal state)
+    PIER_WEST,  // Telescope pointing to west (beyond the pole)
+};
+
 struct AxisCoords {
     float ra;
     float dec;
@@ -78,9 +83,9 @@ ScopeEvent event = EV_NONE;
 
 Location location = {0.75894737, -0.10014247};   // Default location
 uint8_t tracking_mode = 0;
-uint32_t ref_t = 0; // millis() at last cmdSetTime call
+uint32_t ref_t = 0;    // millis() at last cmdSetTime call
 double ref_lst = 0.0;  // Last synced LST
-double ref_jd = 0.0;     // Last synced julian date refered to J2000
+double ref_jd = 0.0;   // Last synced julian date refered to J2000
 bool synced = false;
 EqCoords target = {0};
 
@@ -118,7 +123,7 @@ double normalizeAngle(double h)
 // Obtain current Local Sidereal Time from last synced time
 // This is faster than performing the full calculation from JD & location
 // by calling getLST()
-static double getCurrentLST() {
+double getCurrentLST() {
     return ref_lst + 2*M_PI*(double)(now() - ref_t)/(24.0*60*60);
 }
 
@@ -146,86 +151,185 @@ uint32_t rad2pnex(double rad)
     return (uint32_t)(rad * 0x100000000 / (2*M_PI));
 }
 
+/*****************************************************************************
+  Coordinate conversions
+******************************************************************************/
+
+// Indicates the pointing state of the mount at a given position
+// Reference: https://ascom-standards.org/Help/Platform/html/P_ASCOM_DeviceInterface_ITelescopeV3_SideOfPier.htm
+PierSide getPierSide(AxisCoords ac)
+{
+    return ac.dec < 0 ? PIER_EAST : PIER_WEST;
+}
+
+PierSide getPierSide()
+{
+    uint32_t dec;
+    nexstar.getPosition(DEV_DEC, &dec);
+    dec = normalizeAngle(pnex2rad(dec));
+    return dec < 0 ? PIER_EAST : PIER_WEST;
+}
+
+// Convert mechanical coordinates to local coordinates (HA/dec)
+void axisToLocalCoords(AxisCoords ac, LocalCoords *lc)
+{
+    lc->ha = ac.ra + M_PI/2*(sign(ac.dec) - 1);
+    lc->dec = M_PI/2 - abs(ac.dec);
+}
+
+// Convert local coordinates (HA/dec) to mechanical coordinates
+void localToAxisCoords(LocalCoords lc, AxisCoords *ac)
+{
+    ac->ra = lc.ha + M_PI/2*(1 - sign(lc.ha));
+    ac->dec = (M_PI/2 - lc.dec)*sign(lc.ha);
+}
+
+// Convert local coordinates to equatorial coordinates
+void localToEqCoords(LocalCoords lc, EqCoords *eq)
+{
+    eq->ra = normalizeAngle(getCurrentLST() - lc.ha);
+    eq->dec = lc.dec;
+}
+
+// Convert equatorial coordinates to local coordinates
+void eqToLocalCoords(EqCoords eq, LocalCoords *lc)
+{
+    lc->ha = normalizeAngle(getCurrentLST() - eq.ra);
+    lc->dec = eq.dec;
+}
+
+// Convert equatorial coordinates to mechanical coordinates
+void eqToAxisCoords(EqCoords eq, AxisCoords *ac)
+{
+    LocalCoords lc;
+    eqToLocalCoords(eq, &lc);
+    localToAxisCoords(lc, ac);
+}
+
+// Convert mechanical coordinates equatorial to coordinates
+void axisToEqCoords(AxisCoords ac, EqCoords *eq)
+{
+    LocalCoords lc;
+    axisToLocalCoords(ac, &lc);
+    localToEqCoords(lc, eq);
+}
+
+/*****************************************************************************
+  Get/set/goto position
+******************************************************************************/
+
+void getAxisCoords(AxisCoords *ac)
+{
+    uint32_t ra, dec;
+    nexstar.getPosition(DEV_RA, &ra);
+    nexstar.getPosition(DEV_DEC, &dec);
+
+    ac->ra = normalizeAngle(pnex2rad(ra));
+    ac->dec = normalizeAngle(pnex2rad(dec));
+}
+
+void getLocalCoords(LocalCoords *lc)
+{
+    AxisCoords ac;
+    getAxisCoords(&ac);
+    axisToLocalCoords(ac, lc);
+}
+
+void getEqCoords(EqCoords *eq)
+{
+    LocalCoords lc;
+    getLocalCoords(&lc);
+    localToEqCoords(lc, eq);
+}
+
+void getHorizCoords(HorizCoords *hc)
+{
+    LocalCoords lc;
+    getLocalCoords(&lc);
+    localToHoriz(location, lc, hc);
+}
+
+void setAxisCoords(AxisCoords ac)
+{
+    nexstar.setPosition(DEV_RA, rad2pnex(ac.ra));
+    nexstar.setPosition(DEV_DEC, rad2pnex(ac.dec));
+    synced = true;
+}
+
+void setLocalCoords(LocalCoords lc)
+{
+    AxisCoords ac;
+    localToAxisCoords(lc, &ac);
+    setAxisCoords(ac);
+}
+
+void setEqCoords(EqCoords eq)
+{
+    AxisCoords ac;
+    eqToAxisCoords(eq, &ac);
+    setAxisCoords(ac);
+}
+
+void gotoAxisCoords(AxisCoords ac, bool slow)
+{
+    if (synced) {
+        nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ac.ra));
+        nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(ac.dec));
+    }
+}
+
+void gotoEqCoords(EqCoords eq, bool slow)
+{
+    AxisCoords ac;
+    eqToAxisCoords(eq, &ac);
+    gotoAxisCoords(ac, slow);
+}
+
 void stopMotors()
 {
     nexstar.move(DEV_RA, 0, 0);
     nexstar.move(DEV_DEC, 0, 0);
 }
 
-void getHADec(EqHACoords *eq)
+// Check if both axes have reached their target position
+bool slewDone()
 {
-    uint32_t int_ra_pos, int_dec_pos;
-    nexstar.getPosition(DEV_RA, &int_ra_pos);
-    nexstar.getPosition(DEV_DEC, &int_dec_pos);
-    double ra_pos = normalizeAngle(pnex2rad(int_ra_pos));
-    double dec_pos = normalizeAngle(pnex2rad(int_dec_pos));
+    bool ra_done, dec_done;
 
-    eq->ha = ra_pos + M_PI/2*(sign(dec_pos) - 1);
-    eq->dec = M_PI/2 - abs(dec_pos);
+    nexstar.slewDone(DEV_RA, &ra_done);
+    nexstar.slewDone(DEV_DEC, &dec_done);
+    return ra_done && dec_done;
 }
 
-// Convert local equatorial coordinates to axis coordinates
-void eqHAToAxisCoords(EqHACoords eq, double *ra_pos, double *dec_pos)
+// Check if both axes are less than 10 degrees away from the target
+bool isClose(EqCoords tgt)
 {
-    *ra_pos = eq.ha + M_PI/2*(1 - sign(eq.ha));
-    *dec_pos = (M_PI/2 - eq.dec)*sign(eq.ha);
+    EqCoords eq;
+    getEqCoords(&eq);
+
+    bool ra_diff = fabs(eq.ra - tgt.ra);
+    bool dec_diff = fabs(eq.dec - tgt.dec);
+
+    return fmax(ra_diff, dec_diff) < (10*M_PI/180);
 }
 
-// Convert absolute equatorial coordinates to axis coordinates
-void eqToAxisCoords(EqCoords eq, double *ra_pos, double *dec_pos)
+// Check if a meridian flip is required
+bool checkMeridianFlip(EqCoords eq)
 {
-    EqHACoords eq2 = {normalizeAngle(getCurrentLST() - eq.ra), eq.dec};
-    eqHAToAxisCoords(eq2, ra_pos, dec_pos);
+    AxisCoords ac;
+    PierSide target_side, current_side;
+
+    eqToAxisCoords(eq, &ac);
+    target_side = getPierSide(ac);
+    current_side = getPierSide();
+
+    // A meridian flip is required if both angles have different sign
+    return target_side != target_side;
 }
 
-void getEqCoords(EqCoords *eq)
-{
-    EqHACoords pos;
-    getHADec(&pos);
-
-    eq->ra = normalizeAngle2pi(getCurrentLST() - pos.ha);
-    eq->dec = pos.dec;
-}
-
-void getAzCoords(HorizCoords *hor)
-{
-    EqHACoords pos;
-    getHADec(&pos);
-
-    eqToHoriz(location, pos, hor);
-}
-
-void setEqCoords(EqCoords eq)
-{
-    double ra_pos, dec_pos;
-    eqToAxisCoords(eq, &ra_pos, &dec_pos);
-
-    nexstar.setPosition(DEV_RA, rad2pnex(ra_pos));
-    nexstar.setPosition(DEV_DEC, rad2pnex(dec_pos));
-    synced = true;
-}
-
-void setHACoords(EqHACoords eq)
-{
-    double ra_pos, dec_pos;
-    eqHAToAxisCoords(eq, &ra_pos, &dec_pos);
-
-    nexstar.setPosition(DEV_RA, rad2pnex(ra_pos));
-    nexstar.setPosition(DEV_DEC, rad2pnex(dec_pos));
-    synced = true;
-}
-
-void gotoEqCoords(EqCoords eq, bool slow)
-{
-    if (!synced)
-        return;
-
-    double ra_pos, dec_pos;
-    eqToAxisCoords(eq, &ra_pos, &dec_pos);
-
-    nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ra_pos));
-    nexstar.gotoPosition(DEV_DEC, slow, rad2pnex(dec_pos));
-}
+/*****************************************************************************
+  Serial commands
+******************************************************************************/
 
 void cmdGetEqCoords(char *cmd)
 {
@@ -244,17 +348,24 @@ void cmdGetEqCoords(char *cmd)
 
 void cmdGetAzCoords(char *cmd)
 {
-    HorizCoords hor;
-    getAzCoords(&hor);
+    HorizCoords hc;
+    getHorizCoords(&hc);
 
     char tmp[19];
 
     if (cmd[0] == 'Z')
-        sprintf(tmp, "%04X,%04X#", rad2nex(hor.az), rad2nex(hor.alt));
+        sprintf(tmp, "%04X,%04X#", rad2nex(hc.az), rad2nex(hc.alt));
     else
-        sprintf(tmp, "%08lX,%08lX#", rad2pnex(hor.az), rad2pnex(hor.alt));
+        sprintf(tmp, "%08lX,%08lX#", rad2pnex(hc.az), rad2pnex(hc.alt));
 
     Serial.write(tmp);
+}
+
+void cmdGetPierSide(char *cmd)
+{
+    // Celestron protocol use the opposite definition of pier side
+    Serial.write(getPierSide() == PIER_EAST ? 'W' : 'E');
+    Serial.write('#');
 }
 
 void cmdSyncEqCoords(char *cmd)
@@ -299,14 +410,13 @@ void cmdGotoEqCoords(char *cmd)
     event = EV_GOTO;
 #else
     // Obtain the horizontal coordinates of the target
-    EqHACoords eqHA;
-    HorizCoords hor;
-    eqHA.ha = getCurrentLST() - eq.ra;
-    eqHA.dec = eq.dec;
-    eqToHoriz(location, eqHA, &hor);
+    LocalCoords lc;
+    HorizCoords hc;
+    eqToLocalCoords(eq, &lc);
+    localToHoriz(location, lc, &hc);
 
     // If target is above the horizon, go
-    if (hor.alt >= 0) {
+    if (hc.alt >= 0) {
         target.ra = eq.ra;
         target.dec = eq.dec;
         event = EV_GOTO;
@@ -317,32 +427,30 @@ void cmdGotoEqCoords(char *cmd)
 
 void cmdGotoAzCoords(char *cmd)
 {
-    HorizCoords hor;
+    HorizCoords hc;
 
     if (cmd[0] == 'B') {
         uint16_t az, alt;
         sscanf(cmd + 1, "%4x,%4x", &az, &alt);
-        hor.az = nex2rad(az);
-        hor.alt = nex2rad(alt);
+        hc.az = nex2rad(az);
+        hc.alt = nex2rad(alt);
     } else {
         uint32_t az, alt;
         sscanf(cmd + 1, "%8lx,%8lx", &az, &alt);
-        hor.az = pnex2rad(az);
-        hor.alt = pnex2rad(alt);
+        hc.az = pnex2rad(az);
+        hc.alt = pnex2rad(alt);
     }
 
-    if (hor.alt >= 0) {
+    if (hc.alt >= 0) {
         // If target is above the horizon, go
-        EqHACoords eq;
-        horizToEq(location, hor, &eq);
-        target.ra = getCurrentLST() - eq.ha;
-        target.dec = eq.dec;
-
+        LocalCoords lc;
+        horizToLocal(location, hc, &lc);
+        localToEqCoords(lc, &target);
         event = EV_GOTO;
 
-#ifdef USE_HOME_SWITCHES
+#ifdef ENABLE_HOMING
         // Home the mount if az=0, alt=0
-        if (hor.az == 0 && hor.alt == 0) {
+        if (hc.az == 0 && hc.alt == 0) {
             event = EV_HOME;
         }
 #endif
@@ -526,32 +634,6 @@ void cmdWakeup(char *cmd)
     Serial.write('#');
 }
 
-void cmdDebug1(char *cmd)
-{
-    // return axis positions
-    uint32_t ha_pos, dec_pos;
-    nexstar.getPosition(DEV_RA, &ha_pos);
-    nexstar.getPosition(DEV_DEC, &dec_pos);
-
-    Serial.print(pnex2rad(ha_pos), 6);
-    Serial.print(',');
-    Serial.print(pnex2rad(dec_pos), 6);
-    Serial.print('#');
-}
-
-void cmdDebug2(char *cmd)
-{
-    Serial.print(getCurrentLST(), 6);
-    Serial.print('#');
-}
-
-void cmdDebug3(char *cmd)
-{
-    // return longitude
-    Serial.print(location.longitude, 6);
-    Serial.print('#');
-}
-
 void setup()
 {
     // Map serial commands to functions
@@ -559,6 +641,7 @@ void setup()
     sCmd.addCommand('e', 1, cmdGetEqCoords);
     sCmd.addCommand('Z', 1, cmdGetAzCoords);
     sCmd.addCommand('z', 1, cmdGetAzCoords);
+    sCmd.addCommand('p', 1, cmdGetPierSide);
 
     sCmd.addCommand('S', 10, cmdSyncEqCoords);
     sCmd.addCommand('s', 18, cmdSyncEqCoords);
@@ -586,11 +669,6 @@ void setup()
     sCmd.addCommand('m', 1, cmdGetModel);
     sCmd.addCommand('K', 2, cmdEcho);
 
-    // custom commands
-    sCmd.addCommand('d', 1, cmdDebug1);
-    sCmd.addCommand('D', 1, cmdDebug2);
-    sCmd.addCommand('?', 1, cmdDebug3);
-
     //sCmd.addCommand('J', 1, cmdAlignmentComplete);
     sCmd.addCommand('x', 1, cmdHibernate);
     sCmd.addCommand('y', 1, cmdWakeup);
@@ -608,49 +686,11 @@ void setup()
     // TODO: Read the location from EEPROM
 }
 
-// Check if both motors have reached their target position
-bool slewDone()
-{
-    bool ra_done, dec_done;
-
-    nexstar.slewDone(DEV_RA, &ra_done);
-    nexstar.slewDone(DEV_DEC, &dec_done);
-    return ra_done && dec_done;
-}
-
-// Check if both motors are less than 10 degrees away from the target
-bool isClose()
-{
-    EqCoords current;
-    getEqCoords(&current);
-
-    bool ra_diff = fabs(current.ra - target.ra);
-    bool dec_diff = fabs(current.dec - target.dec);
-
-    return fmax(ra_diff, dec_diff) < M_PI/18;
-}
-
-// Check if a meridian flip is required
-bool checkMeridian()
-{
-    uint32_t int_ra_pos;
-    double curr, ha, tgt;
-    nexstar.getPosition(DEV_RA, &int_ra_pos);
-    curr = normalizeAngle(pnex2rad(int_ra_pos) - M_PI/2);
-
-    ha = normalizeAngle(getCurrentLST() - target.ra + MERIDIAN_MARGIN);
-    tgt = normalizeAngle(ha - M_PI/2*sign(ha));
-
-    // A meridian flip is required if both angles have different sign
-    return curr*tgt < 0;
-}
-
 // Update the scope status with a simple state machine
 void updateFSM()
 {
     static uint32_t t_timer;
-    static int ra_homed = 0, dec_homed = 0;
-    static bool dec_homing_dir = 0;
+    static bool ra_homed = 0, dec_homed = 0, dec_homing_dir = 0;
 
     if (event == EV_ABORT) {
         stopMotors();
@@ -664,18 +704,16 @@ void updateFSM()
         case ST_IDLE:
             if (event == EV_GOTO) {
                 t_timer = millis();
-                if (checkMeridian()) {
+                if (checkMeridianFlip(target)) {
                     // go to the pole before flipping
-                    nexstar.gotoPosition(DEV_RA, 0, rad2pnex(M_PI/2));
-                    nexstar.gotoPosition(DEV_DEC, 0, 0);
+                    gotoAxisCoords((AxisCoords){M_PI/2, 0}, false);
                     state = ST_MERIDIAN_FLIP;
                     DEBUG_PRINT("ST_MERIDIAN_FLIP");
                     break;
                 }
-                bool slow = isClose();
-                gotoEqCoords(target, slow);
-                state = slow ? ST_SLEWING_SLOW : ST_SLEWING_FAST;
-                DEBUG_PRINT(slow ? "ST_SLEWING_SLOW" : "ST_SLEWING_FAST");
+                gotoEqCoords(target, false);
+                state = ST_SLEWING_FAST;
+                DEBUG_PRINT("ST_SLEWING_FAST");
             } else if (event == EV_HOME) {
                 dec_homing_dir = !decHomeSensor();
                 nexstar.move(DEV_DEC, dec_homing_dir, 9);
@@ -690,10 +728,9 @@ void updateFSM()
                 t_timer = millis();
 
                 if (slewDone()) {
-                    bool slow = isClose();
-                    gotoEqCoords(target, slow);
-                    state = slow ? ST_SLEWING_SLOW : ST_SLEWING_FAST;
-                    DEBUG_PRINT(slow ? "ST_SLEWING_SLOW" : "ST_SLEWING_FAST");
+                    gotoEqCoords(target, false);
+                    state = ST_SLEWING_FAST;
+                    DEBUG_PRINT("ST_SLEWING_FAST");
                 }
             }
             break;
@@ -809,9 +846,7 @@ void updateFSM()
             }
 
             if (ra_homed && dec_homed) {
-                //stopMotors();
-                EqHACoords eq = {HOME_HA, HOME_DEC};
-                setHACoords(eq);
+                setLocalCoords((LocalCoords){HOME_HA, HOME_DEC});
                 synced = true;
                 state = ST_IDLE;
                 DEBUG_PRINT("ST_IDLE");
