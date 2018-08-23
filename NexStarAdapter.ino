@@ -6,7 +6,7 @@
 
 ********************************************************************/
 
-//#include <EEPROM.h>
+#include <EEPROM.h>
 #include <SoftwareSerial.h>
 #include <TimeLib.h>
 #include "serial_command.h"
@@ -31,11 +31,6 @@
 //#define BUTTON 3
 #define HOME_DEC_PIN A6
 #define HOME_RA_PIN A7
-
-// Hour angle and declination of home position in radians
-// TODO: store home position in EEPROM
-#define HOME_HA (M_PI*(6 + 2.0/60 + 20.0/3600)/12)   // 6h 2m 20s
-#define HOME_DEC (M_PI*(71 + 12.0/60)/180)           // 71 12'
 
 #define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
@@ -81,13 +76,18 @@ struct AxisCoords {
 ScopeState state = ST_IDLE;
 ScopeEvent event = EV_NONE;
 
-Location location = {0.75894737, -0.10014247};   // Default location
+LocalCoords home_position = {0, M_PI/2};            // Home postion
+Location location = {0, 0};      // Default location
 uint8_t tracking_mode = 0;
 uint32_t ref_t = 0;    // millis() at last cmdSetTime call
 double ref_lst = 0.0;  // Last synced LST
 double ref_jd = 0.0;   // Last synced julian date refered to J2000
 bool synced = false;
 EqCoords target = {0};
+
+// Addresses in EEPROM
+int addr_location = 0;
+int addr_home = addr_location + sizeof(Location);
 
 
 SerialCommand sCmd;
@@ -324,7 +324,7 @@ bool checkMeridianFlip(EqCoords eq)
     current_side = getPierSide();
 
     // A meridian flip is required if both angles have different sign
-    return target_side != target_side;
+    return target_side != current_side;
 }
 
 /*****************************************************************************
@@ -535,10 +535,8 @@ void cmdSetLocation(char *cmd)
         ref_lst = getLST(now(), location);
         synced = false;
 
-        // TODO: Store the location in EEPROM
-        //for (int i = 0; i < 8; i++) {
-            //EEPROM.write(i, cmd[i + 1]);
-        //}
+        // Store the location in EEPROM
+        EEPROM.put(addr_location, location);
     }
 
     Serial.write('#');
@@ -634,6 +632,19 @@ void cmdWakeup(char *cmd)
     Serial.write('#');
 }
 
+void cmdSetHomePosition(char *cmd)
+{
+    uint32_t ha, dec;
+    sscanf(cmd + 1, "%8lx,%8lx", &ha, &dec);
+    home_position.ha = pnex2rad(ha);
+    home_position.dec = pnex2rad(dec);
+
+    // Store the home position in EEPROM
+    EEPROM.put(addr_home, home_position);
+
+    Serial.write('#');
+}
+
 void setup()
 {
     // Map serial commands to functions
@@ -673,6 +684,8 @@ void setup()
     sCmd.addCommand('x', 1, cmdHibernate);
     sCmd.addCommand('y', 1, cmdWakeup);
 
+    sCmd.addCommand('h', 18, cmdSetHomePosition);
+
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
     //pinMode(BUTTON, INPUT_PULLUP);
@@ -683,7 +696,9 @@ void setup()
     Serial.begin(BAUDRATE);
     nexstar.init();
 
-    // TODO: Read the location from EEPROM
+    // read location and home position from EEPROM
+    EEPROM.get(addr_location, location);
+    EEPROM.get(addr_home, home_position);
 }
 
 // Update the scope status with a simple state machine
@@ -846,7 +861,7 @@ void updateFSM()
             }
 
             if (ra_homed && dec_homed) {
-                setLocalCoords((LocalCoords){HOME_HA, HOME_DEC});
+                setLocalCoords(home_position);
                 synced = true;
                 state = ST_IDLE;
                 DEBUG_PRINT("ST_IDLE");
