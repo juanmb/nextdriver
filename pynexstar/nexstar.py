@@ -126,11 +126,14 @@ class NexStar(object):
 
     def goto_eq_coords(self, ra, dec, precise=False):
         coords = rad2nex(ra, precise), rad2nex(dec, precise)
-        print "Goto eq:", ra, dec, coords
         if precise:
             self.send_packet('r%08X,%08X' % coords, 1)
         else:
             self.send_packet('R%04X,%04X' % coords, 1)
+
+    def set_home_position(self, ha, dec):
+        coords = rad2nex(ha, True), rad2nex(dec, True)
+        self.send_packet('i%08X,%08X' % coords, 1)
 
     def set_location(self, lat, lon):
         ''' Set location in radians '''
@@ -191,22 +194,6 @@ class NexStar(object):
     def set_tracking_mode(self, mode=0):
         self.send_packet('T%c' % mode, 1)
 
-    def get_j2000_date(self):
-        ret = self.send_packet('j', 12)
-        return float(ret[:-1])
-
-    def get_axis_pos(self):
-        ret = self.send_packet('d', 18)
-        ha_pos, dec_pos = ret[:-1].split(',')
-        return float(ha_pos), float(dec_pos)
-
-    def get_sidereal_time(self):
-        ret = self.send_packet('D', 9)
-        return float(ret[:-1])
-
-    def get_long(self):
-        ret = self.send_packet('?', 9)
-        return float(ret[:-1])
 
 if __name__ == '__main__':
     nex = NexStar('/dev/ttyACM0', False)
@@ -215,6 +202,10 @@ if __name__ == '__main__':
 
     nex.set_time(time.strftime('%Y/%m/%d %H:%M:%S'))
     nex.set_location(43.540*pi/180, -5.658*pi/180)
+    nex.set_home_position(
+        pi*(6 + 2./60 + 20./3600)/12,
+        pi*(71 + 12./60)/180,
+    )
 
     print "Version:\t", nex.get_version()
     #print "Variant:\t", nex.get_variant()
@@ -224,10 +215,6 @@ if __name__ == '__main__':
     print "Time:\t", nex.get_time()
 
     print nex.get_eq_coords(precise=True)
-
-    for i in range(20):
-        print nex.get_debug1(), nex.get_sidereal_time()
-        time.sleep(2)
 
     #nex.sync_eq_coords(1.5, 0.3, precise=True)
 

@@ -39,9 +39,11 @@
 #define raHomeSensor() (analogRead(HOME_RA_PIN) > 512)   // returns true if blocked
 
 #ifdef DEBUG
-#define DEBUG_PRINT(str) debug.println(str)
+#define DEBUG_PRINT(x) debug.println(x)
+#define DEBUG_FLOAT(x) debug.println(x, 6)
 #else
-#define DEBUG_PRINT(str) do {} while(0)
+#define DEBUG_PRINT(x) do {} while(0)
+#define DEBUG_FLOAT(x) do {} while(0)
 #endif
 
 enum ScopeState {
@@ -159,15 +161,15 @@ uint32_t rad2pnex(double rad)
 // Reference: https://ascom-standards.org/Help/Platform/html/P_ASCOM_DeviceInterface_ITelescopeV3_SideOfPier.htm
 PierSide getPierSide(AxisCoords ac)
 {
-    return ac.dec < 0 ? PIER_EAST : PIER_WEST;
+    return normalizeAngle(ac.dec) < 0 ? PIER_EAST : PIER_WEST;
 }
 
 PierSide getPierSide()
 {
-    uint32_t dec;
-    nexstar.getPosition(DEV_DEC, &dec);
-    dec = normalizeAngle(pnex2rad(dec));
-    return dec < 0 ? PIER_EAST : PIER_WEST;
+    uint32_t int_dec;
+    nexstar.getPosition(DEV_DEC, &int_dec);
+    float dec = pnex2rad(int_dec);
+    return normalizeAngle(dec) < 0 ? PIER_EAST : PIER_WEST;
 }
 
 // Convert mechanical coordinates to local coordinates (HA/dec)
@@ -641,6 +643,8 @@ void cmdSetHomePosition(char *cmd)
 
     // Store the home position in EEPROM
     EEPROM.put(addr_home, home_position);
+    DEBUG_FLOAT(home_position.ha);
+    DEBUG_FLOAT(home_position.dec);
 
     Serial.write('#');
 }
@@ -684,7 +688,7 @@ void setup()
     sCmd.addCommand('x', 1, cmdHibernate);
     sCmd.addCommand('y', 1, cmdWakeup);
 
-    sCmd.addCommand('h', 18, cmdSetHomePosition);
+    sCmd.addCommand('i', 18, cmdSetHomePosition);
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
