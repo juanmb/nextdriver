@@ -16,7 +16,7 @@
 
 #define VERSION_MAJOR 4
 #define VERSION_MINOR 21
-#define MOUNT_MODEL 10  // GT
+#define MOUNT_MODEL 14  // CGEM DX
 #define CONTROLLER_VARIANT 0x11  // NexStar
 #define BAUDRATE 9600
 #define GO_BELOW_HORIZON
@@ -66,8 +66,8 @@ enum ScopeEvent {
 };
 
 enum PierSide {
-    PIER_EAST,  // Telescope pointing to east (normal state)
-    PIER_WEST,  // Telescope pointing to west (beyond the pole)
+    PIER_EAST,  // Mount on the east side of pier (looking west). Normal state
+    PIER_WEST,  // Mount on the west side of pier (looking east)
 };
 
 struct AxisCoords {
@@ -161,7 +161,7 @@ uint32_t rad2pnex(double rad)
 // Reference: https://ascom-standards.org/Help/Platform/html/P_ASCOM_DeviceInterface_ITelescopeV3_SideOfPier.htm
 PierSide getPierSide(AxisCoords ac)
 {
-    return normalizeAngle(ac.dec) < 0 ? PIER_EAST : PIER_WEST;
+    return normalizeAngle(ac.dec) < 0 ? PIER_WEST : PIER_EAST;
 }
 
 PierSide getPierSide()
@@ -169,7 +169,7 @@ PierSide getPierSide()
     uint32_t int_dec;
     nexstar.getPosition(DEV_DEC, &int_dec);
     float dec = pnex2rad(int_dec);
-    return normalizeAngle(dec) < 0 ? PIER_EAST : PIER_WEST;
+    return normalizeAngle(dec) < 0 ? PIER_WEST : PIER_EAST;
 }
 
 // Convert mechanical coordinates to local coordinates (HA/dec)
