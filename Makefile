@@ -8,7 +8,7 @@
 # 	https://github.com/sudar/Arduino-Makefile
 
 BOARD_TAG    = nano
-BOARD_SUB    = atmega328
+BOARD_SUB    = atmega328old
 ARDUINO_LIBS = SoftwareSerial EEPROM Time AstroLib AccelStepper
 ARDUINO_SKETCHBOOK = .
 #ARDUINO_PORT = /dev/ttyACM0

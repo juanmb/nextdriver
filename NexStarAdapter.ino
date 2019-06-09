@@ -36,7 +36,7 @@
 #define sign(x) (((x) > 0) ? 1 : -1)
 
 #define decHomeSensor() (analogRead(HOME_DEC_PIN) > 512) // true if blocked
-#define raHomeSensor() (analogRead(HOME_RA_PIN) < 512)   // true if not blocked
+#define raHomeSensor() (analogRead(HOME_RA_PIN) > 512)   // true if blocked
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) debug.println(x)
