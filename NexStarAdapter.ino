@@ -239,6 +239,10 @@ void getLocalCoords(LocalCoords *lc)
 
 void getEqCoords(EqCoords *eq)
 {
+    if (!synced) {
+        *eq = {0, 0};
+        return;
+    }
     LocalCoords lc;
     getLocalCoords(&lc);
     localToEqCoords(lc, eq);
@@ -301,18 +305,6 @@ bool slewDone()
     nexstar.slewDone(DEV_RA, &ra_done);
     nexstar.slewDone(DEV_DEC, &dec_done);
     return ra_done && dec_done;
-}
-
-// Check if both axes are less than 10 degrees away from the target
-bool isClose(EqCoords tgt)
-{
-    EqCoords eq;
-    getEqCoords(&eq);
-
-    bool ra_diff = fabs(eq.ra - tgt.ra);
-    bool dec_diff = fabs(eq.dec - tgt.dec);
-
-    return fmax(ra_diff, dec_diff) < (10*M_PI/180);
 }
 
 // Check if a meridian flip is required
@@ -865,8 +857,7 @@ void updateFSM()
             }
 
             if (ra_homed && dec_homed) {
-                setLocalCoords(home_position);
-                synced = true;
+                synced = false;
                 state = ST_IDLE;
                 DEBUG_PRINT("ST_IDLE");
             }
