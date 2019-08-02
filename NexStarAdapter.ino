@@ -239,10 +239,12 @@ void getLocalCoords(LocalCoords *lc)
 
 void getEqCoords(EqCoords *eq)
 {
+    /*
     if (!synced) {
         *eq = {0, 0};
         return;
     }
+    */
     LocalCoords lc;
     getLocalCoords(&lc);
     localToEqCoords(lc, eq);
@@ -626,12 +628,12 @@ void cmdWakeup(char *cmd)
     Serial.write('#');
 }
 
-void cmdSetHomePosition(char *cmd)
+void cmdSyncHomePosition(char *cmd)
 {
-    uint32_t ha, dec;
-    sscanf(cmd + 1, "%8lx,%8lx", &ha, &dec);
-    home_position.ha = pnex2rad(ha);
-    home_position.dec = pnex2rad(dec);
+    LocalCoords lc;
+    getLocalCoords(&lc);
+    home_position.ha = lc.ha;
+    home_position.dec = lc.dec;
 
     // Store the home position in EEPROM
     EEPROM.put(addr_home, home_position);
@@ -680,7 +682,7 @@ void setup()
     sCmd.addCommand('x', 1, cmdHibernate);
     sCmd.addCommand('y', 1, cmdWakeup);
 
-    sCmd.addCommand('i', 18, cmdSetHomePosition);
+    sCmd.addCommand('i', 1, cmdSyncHomePosition);
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
@@ -695,6 +697,7 @@ void setup()
     // read location and home position from EEPROM
     EEPROM.get(addr_location, location);
     EEPROM.get(addr_home, home_position);
+    setLocalCoords(home_position);
 }
 
 // Update the scope status with a simple state machine
@@ -857,7 +860,8 @@ void updateFSM()
             }
 
             if (ra_homed && dec_homed) {
-                synced = false;
+                setLocalCoords(home_position);
+                synced = true;
                 state = ST_IDLE;
                 DEBUG_PRINT("ST_IDLE");
             }
