@@ -568,8 +568,8 @@ void cmdGetTime(char *cmd)
     Serial.write(month(t));
     Serial.write(day(t));
     Serial.write(year(t) % 2000);
-    Serial.write(0);
-    Serial.write(0);
+    Serial.write((byte)0);
+    Serial.write((byte)0);
     Serial.write("#");
 }
 
