@@ -900,6 +900,7 @@ void updateFSM()
 
 void loop()
 {
+    digitalWrite(LED_BUILTIN, HIGH);
     sCmd.readSerial();
     updateFSM();
     nexstar.run();
