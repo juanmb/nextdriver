@@ -13,7 +13,6 @@
 #ifndef _nexstar_aux_h_
 #define _nexstar_aux_h_
 
-#include <SoftwareSerial.h>
 #include "nexstar_base.h"
 
 
@@ -51,7 +50,6 @@ private:
     int newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
             uint8_t size, char* data);
 
-    SoftwareSerial *serial;
     int select_pin;
 };
 

@@ -4,3 +4,6 @@
 [submodule "libraries/Time"]
 	path = libraries/Time
 	url = https://github.com/PaulStoffregen/Time.git
+[submodule "libraries/DueFlashStorage"]
+	path = libraries/DueFlashStorage
+	url = https://github.com/sebnil/DueFlashStorage.git

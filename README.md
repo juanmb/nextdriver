@@ -54,14 +54,28 @@ Arduino libraries directory.
 
 ## Compiling
 
-The code can be compiled and uploaded to the Arduino board using `make`.
 The provided Makefile requires [Arduino-Makefile](https://github.com/sudar/Arduino-Makefile)
 to work. In Debian/Ubuntu/Mint, you can install it with
 
     sudo apt install arduino-mk
 
+If you downloaded `Arduino-Makefile` to a custom location (other than
+`/usr/share/arduino`), you must indicate the correct directory by modifying
+the `ARDMK_DIR` variable in the `Makefile.avr` or `Makefile.sam`.
+
+The code can be compiled and uploaded to the Arduino board using
+
+    make
+    make upload
+
 Of course, you can also program the Arduino board using the Arduino IDE.
 
+### Compiling for Arduino Due
+
+Download the toolchain for SAM boards using the Boards Manager in the Arduino IDE.
+
+Comment the line `include Makefile.avr` and discomment the line
+`include Makefile.sam` in the `Makefile`.
 
 ## Schematics
 

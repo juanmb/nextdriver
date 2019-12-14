@@ -6,8 +6,12 @@
 
 ********************************************************************/
 
+#ifdef __AVR__
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
+#else
+#include <DueFlashStorage.h>
+#endif
 #include <TimeLib.h>
 #include "serial_command.h"
 #include "nexstar_aux.h"
@@ -32,7 +36,7 @@
 #define HOME_DEC_PIN A6
 #define HOME_RA_PIN A7
 
-#define abs(x) (((x) > 0) ? (x) : -(x))
+//#define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
 
 #define decHomeSensor() (analogRead(HOME_DEC_PIN) > 512) // true if blocked
@@ -44,6 +48,10 @@
 #else
 #define DEBUG_PRINT(x) do {} while(0)
 #define DEBUG_FLOAT(x) do {} while(0)
+#endif
+
+#ifdef __arm__
+DueFlashStorage FS;
 #endif
 
 enum ScopeState {
@@ -87,10 +95,9 @@ double ref_jd = 0.0;   // Last synced julian date refered to J2000
 bool synced = false;
 EqCoords target = {0};
 
-// Addresses in EEPROM
+// Addresses in EEPROM/Flash
 int addr_location = 0;
 int addr_home = addr_location + sizeof(Location);
-
 
 SerialCommand sCmd;
 NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
@@ -370,7 +377,7 @@ void cmdSyncEqCoords(char *cmd)
 
     if (cmd[0] == 'S') {
         uint16_t ra, dec;
-        sscanf(cmd + 1, "%4x,%4x", &ra, &dec);
+        sscanf(cmd + 1, "%4hx,%4hx", &ra, &dec);
         eq.ra = nex2rad(ra);
         eq.dec = nex2rad(dec);
     } else {
@@ -390,7 +397,7 @@ void cmdGotoEqCoords(char *cmd)
 
     if (cmd[0] == 'R') {
         uint16_t ra, dec;
-        sscanf(cmd + 1, "%4x,%4x", &ra, &dec);
+        sscanf(cmd + 1, "%4hx,%4hx", &ra, &dec);
         eq.ra = nex2rad(ra);
         eq.dec = nex2rad(dec);
     } else {
@@ -427,7 +434,7 @@ void cmdGotoAzCoords(char *cmd)
 
     if (cmd[0] == 'B') {
         uint16_t az, alt;
-        sscanf(cmd + 1, "%4x,%4x", &az, &alt);
+        sscanf(cmd + 1, "%4hx,%4hx", &az, &alt);
         hc.az = nex2rad(az);
         hc.alt = nex2rad(alt);
     } else {
@@ -532,7 +539,13 @@ void cmdSetLocation(char *cmd)
         synced = false;
 
         // Store the location in EEPROM
+#ifdef __arm__
+	byte b[sizeof(Location)];
+	memcpy(b, &location, sizeof(Location));
+	FS.write(addr_location, b, sizeof(Location));
+#else
         EEPROM.put(addr_location, location);
+#endif
     }
 
     Serial.write('#');
@@ -568,8 +581,8 @@ void cmdGetTime(char *cmd)
     Serial.write(month(t));
     Serial.write(day(t));
     Serial.write(year(t) % 2000);
-    Serial.write(0);
-    Serial.write(0);
+    Serial.write((uint8_t)0);
+    Serial.write((uint8_t)0);
     Serial.write("#");
 }
 
@@ -636,7 +649,14 @@ void cmdSyncHomePosition(char *cmd)
     home_position.dec = lc.dec;
 
     // Store the home position in EEPROM
+#ifdef __arm__
+    byte b[sizeof(LocalCoords)];
+    memcpy(b, &home_position, sizeof(LocalCoords));
+    FS.write(addr_home, b, sizeof(LocalCoords));
+#else
     EEPROM.put(addr_home, home_position);
+#endif
+
     DEBUG_FLOAT(home_position.ha);
     DEBUG_FLOAT(home_position.dec);
 
@@ -695,8 +715,15 @@ void setup()
     nexstar.init();
 
     // read location and home position from EEPROM
+#ifdef __arm__
+    byte *b1 = FS.readAddress(addr_location);
+    memcpy(&location, b1, sizeof(Location));
+    byte *b2 = FS.readAddress(addr_home);
+    memcpy(&home_position, b2, sizeof(LocalCoords));
+#else
     EEPROM.get(addr_location, location);
     EEPROM.get(addr_home, home_position);
+#endif
     setLocalCoords(home_position);
 }
 

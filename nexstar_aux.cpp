@@ -15,7 +15,28 @@
 
 #define AUX_BAUDRATE 19200
 #define RESP_TIMEOUT 800   // timeout in milliseconds
+#ifdef __AVR__
+#endif
 
+#ifdef __AVR__
+#include <SoftwareSerial.h>
+
+#define serialBegin(x) (serial->begin(x))
+#define serialWrite(x) (serial->write(x))
+#define serialFlush() (serial->flush())
+#define serialAvailable() (serial->available())
+#define serialRead() (serial->read())
+
+SoftwareSerial *serial;
+
+#else
+// In Arduino DUE, we use Serial1
+#define serialBegin(x) (Serial1.begin(x))
+#define serialWrite(x) (Serial1.write(x))
+#define serialFlush(x) (Serial1.flush())
+#define serialAvailable() (Serial1.available())
+#define serialRead() (Serial1.read())
+#endif
 
 uint8_t calcCRC(NexStarMessage *msg)
 {
@@ -31,7 +52,9 @@ uint8_t calcCRC(NexStarMessage *msg)
 
 NexStarAux::NexStarAux(int rx, int tx, int select)
 {
+#ifdef __AVR__
     serial = new SoftwareSerial(rx, tx);
+#endif
     select_pin = select;
 }
 
@@ -39,7 +62,7 @@ NexStarAux::NexStarAux(int rx, int tx, int select)
 void NexStarAux::init()
 {
     pinMode(select_pin, INPUT);
-    serial->begin(AUX_BAUDRATE);
+    serialBegin(AUX_BAUDRATE);
 }
 
 // Fill NexStarMessage struct
@@ -76,12 +99,11 @@ int NexStarAux::sendCommand(uint8_t dest, uint8_t id, uint8_t size,
     digitalWrite(select_pin, LOW);
     pinMode(select_pin, OUTPUT);
     for (int i = 0; i < size + 5; i++) {
-        serial->write(bytes[i]);
+        serialWrite(bytes[i]);
     }
-    serial->write(msg.crc);
+    serialWrite(msg.crc);
+    serialFlush();
     pinMode(select_pin, INPUT);
-
-    serial->flush();
 
     long int t0 = millis();
 
@@ -103,8 +125,8 @@ int NexStarAux::sendCommand(uint8_t dest, uint8_t id, uint8_t size,
 
     bytes = (char*)(resp);
     unsigned int pos = 0;
-    while (serial->available()) {
-        bytes[pos++] = serial->read();
+    while (serialAvailable()) {
+        bytes[pos++] = serialRead();
         if (pos >= sizeof(NexStarMessage)) {
             return ERR_BAD_SIZE;
         }
