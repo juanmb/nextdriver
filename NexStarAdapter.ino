@@ -28,13 +28,24 @@
 //#define DEBUG
 
 // pin definitions
-#define AUX_SELECT 5
-#define AUX_RX 6
-#define AUX_TX 7
-#define DEBUG_TX 2
-//#define BUTTON 3
-#define HOME_DEC_PIN A6
-#define HOME_RA_PIN A7
+#define AUX_BUSY   2
+#define AUX_SELECT 3
+#define AUX_TX     4
+#define AUX_RX     5
+//#define DEBUG_TX 6
+
+#define LED_STATUS_G 12
+#define LED_STATUS_R 13
+#define LED_ERROR    11
+#define LED_GREEN    10
+#define LED_YELLOW    9
+
+#define HOME_BUTTON   7
+#define PARK_BUTTON   8
+#define HOME_DEC_PIN  A0
+#define LIMIT_DEC_PIN A1
+#define HOME_RA_PIN   A2
+#define LIMIT_RA_PIN  A3
 
 //#define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
@@ -100,11 +111,11 @@ int addr_location = 0;
 int addr_home = addr_location + sizeof(Location);
 
 SerialCommand sCmd;
-NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
+NexStarAux nexstar(AUX_RX, AUX_TX, AUX_BUSY);
 //NexStarStepper nexstar;
 
 #ifdef DEBUG
-SoftwareSerial debug(4, 2);
+SoftwareSerial debug(DEBUG_TX);
 #endif
 
 // Get current Julian date
@@ -706,7 +717,17 @@ void setup()
 
     pinMode(AUX_SELECT, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
-    //pinMode(BUTTON, INPUT_PULLUP);
+    pinMode(LED_STATUS_R, OUTPUT);
+    pinMode(LED_STATUS_G, OUTPUT);
+    pinMode(LED_ERROR, OUTPUT);
+    pinMode(LED_GREEN, OUTPUT);
+    pinMode(LED_YELLOW, OUTPUT);
+
+    pinMode(HOME_BUTTON, INPUT_PULLUP);
+    pinMode(PARK_BUTTON, INPUT_PULLUP);
+    pinMode(LIMIT_RA_PIN, INPUT_PULLUP);
+    pinMode(LIMIT_DEC_PIN, INPUT_PULLUP);
+    digitalWrite(AUX_SELECT, HIGH);
 
 #ifdef DEBUG
     debug.begin(9600);
@@ -900,8 +921,17 @@ void updateFSM()
 
 void loop()
 {
-    digitalWrite(LED_BUILTIN, HIGH);
-    sCmd.readSerial();
-    updateFSM();
-    nexstar.run();
+	if (digitalRead(HOME_BUTTON)) {
+		digitalWrite(LED_ERROR, LOW);
+	} else {
+		digitalWrite(LED_ERROR, HIGH);
+	}
+	if (digitalRead(PARK_BUTTON)) {
+		digitalWrite(AUX_SELECT, LOW);
+	} else {
+		digitalWrite(AUX_SELECT, HIGH);
+	}
+    //sCmd.readSerial();
+    //updateFSM();
+    //nexstar.run();
 }
