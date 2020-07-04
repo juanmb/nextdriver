@@ -50,18 +50,20 @@ uint8_t calcCRC(NexStarMessage *msg)
 }
 
 
-NexStarAux::NexStarAux(int rx, int tx, int select)
+NexStarAux::NexStarAux(int rx, int tx, int select, int busy)
 {
 #ifdef __AVR__
     serial = new SoftwareSerial(rx, tx);
 #endif
     select_pin = select;
+    busy_pin = busy;
 }
 
 // Initialize pins and setup serial port
 void NexStarAux::init()
 {
-    pinMode(select_pin, INPUT);
+    pinMode(select_pin, OUTPUT);
+    pinMode(busy_pin, INPUT);
     serialBegin(AUX_BAUDRATE);
 }
 
@@ -97,26 +99,25 @@ int NexStarAux::sendCommand(uint8_t dest, uint8_t id, uint8_t size,
     }
 
     digitalWrite(select_pin, LOW);
-    pinMode(select_pin, OUTPUT);
     for (int i = 0; i < size + 5; i++) {
         serialWrite(bytes[i]);
     }
     serialWrite(msg.crc);
     serialFlush();
-    pinMode(select_pin, INPUT);
+    digitalWrite(select_pin, HIGH);
 
     long int t0 = millis();
 
     delay(1);
-    // wait while select pin is low
-    while(digitalRead(select_pin) == HIGH) {
+    // wait while select pin is high
+    while(digitalRead(busy_pin) == HIGH) {
         if (millis() - t0 > RESP_TIMEOUT) {
             return ERR_TIMEOUT;
         }
         delay(1);
     }
-    // wait while select pin is high
-    while(digitalRead(select_pin) == LOW) {
+    // wait while select pin is low
+    while(digitalRead(busy_pin) == LOW) {
         delay(1);
         if (millis() - t0 > RESP_TIMEOUT) {
             return ERR_TIMEOUT;

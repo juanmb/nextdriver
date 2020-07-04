@@ -34,11 +34,11 @@
 #define AUX_RX     5
 //#define DEBUG_TX 6
 
-#define LED_STATUS_G 12
-#define LED_STATUS_R 13
-#define LED_ERROR    11
-#define LED_GREEN    10
-#define LED_YELLOW    9
+#define LED_STATUS_G 12 // synced/homed
+#define LED_STATUS_R 13 // no time set
+#define LED_RED      11 // error
+#define LED_GREEN    10 // slewing
+#define LED_YELLOW    9 // parked
 
 #define HOME_BUTTON   7
 #define PARK_BUTTON   8
@@ -104,6 +104,9 @@ uint32_t ref_t = 0;    // millis() at last cmdSetTime call
 double ref_lst = 0.0;  // Last synced LST
 double ref_jd = 0.0;   // Last synced julian date refered to J2000
 bool synced = false;
+bool time_set = false;
+bool aligned = false;
+bool parked = false;
 EqCoords target = {0};
 
 // Addresses in EEPROM/Flash
@@ -111,7 +114,7 @@ int addr_location = 0;
 int addr_home = addr_location + sizeof(Location);
 
 SerialCommand sCmd;
-NexStarAux nexstar(AUX_RX, AUX_TX, AUX_BUSY);
+NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT, AUX_BUSY);
 //NexStarStepper nexstar;
 
 #ifdef DEBUG
@@ -472,6 +475,12 @@ void cmdGotoAzCoords(char *cmd)
     Serial.write('#');
 }
 
+void cmdIsAligned(char *cmd)
+{
+    Serial.write(aligned ? '1' : '0');
+    Serial.write('#');
+}
+
 void cmdGotoInProgress(char *cmd)
 {
     Serial.write(state == ST_IDLE ? '0' : '1');
@@ -551,9 +560,9 @@ void cmdSetLocation(char *cmd)
 
         // Store the location in EEPROM
 #ifdef __arm__
-	byte b[sizeof(Location)];
-	memcpy(b, &location, sizeof(Location));
-	FS.write(addr_location, b, sizeof(Location));
+        byte b[sizeof(Location)];
+        memcpy(b, &location, sizeof(Location));
+        FS.write(addr_location, b, sizeof(Location));
 #else
         EEPROM.put(addr_location, location);
 #endif
@@ -578,6 +587,7 @@ void cmdSetTime(char *cmd)
 
     ref_t = now();
     ref_lst = getLST(ref_t, location);
+    time_set = true;
     synced = false;
 
     Serial.write('#');
@@ -694,6 +704,7 @@ void setup()
 
     sCmd.addCommand('L', 1, cmdGotoInProgress);
     sCmd.addCommand('M', 1, cmdCancelGoto);
+    sCmd.addCommand('J', 1, cmdIsAligned);
 
     sCmd.addCommand('T', 2, cmdSetTrackingMode);
     sCmd.addCommand('t', 1, cmdGetTrackingMode);
@@ -716,10 +727,10 @@ void setup()
     sCmd.addCommand('i', 1, cmdSyncHomePosition);
 
     pinMode(AUX_SELECT, OUTPUT);
-    pinMode(LED_BUILTIN, OUTPUT);
+    //pinMode(LED_BUILTIN, OUTPUT);
     pinMode(LED_STATUS_R, OUTPUT);
     pinMode(LED_STATUS_G, OUTPUT);
-    pinMode(LED_ERROR, OUTPUT);
+    pinMode(LED_RED, OUTPUT);
     pinMode(LED_GREEN, OUTPUT);
     pinMode(LED_YELLOW, OUTPUT);
 
@@ -727,7 +738,6 @@ void setup()
     pinMode(PARK_BUTTON, INPUT_PULLUP);
     pinMode(LIMIT_RA_PIN, INPUT_PULLUP);
     pinMode(LIMIT_DEC_PIN, INPUT_PULLUP);
-    digitalWrite(AUX_SELECT, HIGH);
 
 #ifdef DEBUG
     debug.begin(9600);
@@ -779,6 +789,7 @@ void updateFSM()
             } else if (event == EV_HOME) {
                 dec_homing_dir = !decHomeSensor();
                 nexstar.move(DEV_DEC, dec_homing_dir, 9);
+                aligned = false;
                 state = ST_HOMING_DEC;
                 DEBUG_PRINT("ST_HOMING_DEC");
             }
@@ -910,6 +921,7 @@ void updateFSM()
             if (ra_homed && dec_homed) {
                 setLocalCoords(home_position);
                 synced = true;
+                aligned = true;
                 state = ST_IDLE;
                 DEBUG_PRINT("ST_IDLE");
             }
@@ -919,19 +931,32 @@ void updateFSM()
     event = EV_NONE;
 }
 
+void updateLEDs()
+{
+    if (!time_set) {
+        digitalWrite(LED_STATUS_G, LOW);
+        digitalWrite(LED_STATUS_R, HIGH);
+    } else if (!synced) {
+        digitalWrite(LED_STATUS_G, HIGH);
+        digitalWrite(LED_STATUS_R, HIGH);
+    } else {
+        digitalWrite(LED_STATUS_G, HIGH);
+        digitalWrite(LED_STATUS_R, LOW);
+    }
+
+    digitalWrite(LED_GREEN, (state != ST_IDLE));
+    digitalWrite(LED_YELLOW, parked);
+}
+
 void loop()
 {
-	if (digitalRead(HOME_BUTTON)) {
-		digitalWrite(LED_ERROR, LOW);
-	} else {
-		digitalWrite(LED_ERROR, HIGH);
-	}
-	if (digitalRead(PARK_BUTTON)) {
-		digitalWrite(AUX_SELECT, LOW);
-	} else {
-		digitalWrite(AUX_SELECT, HIGH);
-	}
-    //sCmd.readSerial();
-    //updateFSM();
-    //nexstar.run();
+    if (!digitalRead(HOME_BUTTON))
+        event = EV_HOME;
+    else if (!digitalRead(PARK_BUTTON))
+        event = EV_ABORT;
+
+    sCmd.readSerial();
+    updateFSM();
+    updateLEDs();
+    nexstar.run();
 }

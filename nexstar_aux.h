@@ -18,7 +18,7 @@
 
 class NexStarAux : public NexStarBase {
 public:
-    NexStarAux(int rx, int tx, int select);
+    NexStarAux(int rx, int tx, int select, int busy);
     void init();
 
     int setPosition(uint8_t dest, uint32_t pos);
@@ -51,6 +51,7 @@ private:
             uint8_t size, char* data);
 
     int select_pin;
+    int busy_pin;
 };
 
 #endif
