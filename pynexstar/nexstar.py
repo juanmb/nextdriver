@@ -55,12 +55,12 @@ class NexStar(object):
 
     def send_packet(self, data, resp_len):
         if self.debug:
-            print "Sent:", to_hex(data) if data[0] in 'PWH' else data
+            print("Sent:", to_hex(data) if data[0] in 'PWH' else data)
         self.serial.write(data)
         self.serial.flushInput()
         resp = self.serial.read(resp_len)
         if self.debug:
-            print "Recv:", resp if data[0] in 'eEzZ' else to_hex(resp)
+            print("Recv:", resp if data[0] in 'eEzZ' else to_hex(resp))
         return resp
 
     def send_passthrough(self, dest, Id, payload='', resp_len=0):
@@ -186,6 +186,10 @@ class NexStar(object):
         ret = self.send_packet('L', 2)
         return ret[0] != '0'
 
+    def is_aligned(self):
+        ret = self.send_packet('J', 2)
+        return ret[0] != '0'
+
     def get_tracking_mode(self):
         ret = self.send_packet('t', 2)
         return ord(ret[0])
@@ -195,26 +199,35 @@ class NexStar(object):
 
 
 if __name__ == '__main__':
-    nex = NexStar('/dev/ttyACM0', False)
+    nex = NexStar('/dev/ttyUSB0', debug=False)
     while nex.echo('x') != 'x':
         pass
 
     nex.set_time(time.strftime('%Y/%m/%d %H:%M:%S'))
-    nex.set_location(43.540*pi/180, -5.658*pi/180)
+    #location = (43.540*pi/180, -5.658*pi/180)
+    #nex.set_location(*location)
 
-    print "Version:\t", nex.get_version()
+    print("Version:", nex.get_version())
     #print "Variant:\t", nex.get_variant()
-    print "Model:  \t", nex.get_model()
-    print "Dec version:\t", nex.get_device_version(DEC_DEV)
-    print "RA version:\t", nex.get_device_version(RA_DEV)
-    print "Time:   \t", nex.get_time()
-    print "Location:\t", nex.get_location()
-    print "EQ coords:\t", nex.get_eq_coords(precise=True)
+    print("Model:  ", nex.get_model())
+    print("Dec version:", nex.get_device_version(DEC_DEV))
+    print("RA version:", nex.get_device_version(RA_DEV))
+    print("Time:   ", nex.get_time())
+    print("Location:", nex.get_location())
+    print("EQ coords:", nex.get_eq_coords(precise=True))
 
-    #nex.sync_eq_coords(1.5, 0.3, precise=True)
+    #nex.sync_eq_coords(1.5, 1.3, precise=True)
+    print("EQ coords:", nex.get_eq_coords(precise=True))
+    print("Aligned:", nex.is_aligned())
+    print("Slewing:", nex.is_slewing())
 
-    # nex.set_tracking_mode(0)
-    # print "Tracking mode:", nex.get_tracking_mode()
+
+    nex.set_tracking_mode(2)
+    print("Tracking mode:", nex.get_tracking_mode())
+
+    for i in range(100):
+        print("EQ coords:", nex.get_eq_coords(precise=True))
+        time.sleep(1)
 
     # set coords (in deg)
     # nex.goto_eq_coords(0, 0)

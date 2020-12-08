@@ -10,7 +10,7 @@
 ARDMK_DIR    = /usr/share/arduino
 BOARD_TAG    = uno
 ARDUINO_LIBS = SoftwareSerial EEPROM Time AstroLib AccelStepper
-ARDUINO_PORT = /dev/ttyACM0
+ARDUINO_PORT = /dev/ttyUSB0
 ARDUINO_SKETCHBOOK = .
 
 include $(ARDMK_DIR)/Arduino.mk

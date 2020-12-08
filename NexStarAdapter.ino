@@ -41,11 +41,11 @@
 #define LED_YELLOW    9 // parked
 
 #define HOME_BUTTON   7
-#define PARK_BUTTON   8
-#define HOME_DEC_PIN  A0
-#define LIMIT_DEC_PIN A1
-#define HOME_RA_PIN   A2
-#define LIMIT_RA_PIN  A3
+#define ABORT_BUTTON   8
+#define HOME_RA_PIN   A0
+#define LIMIT_RA_PIN  A1
+#define HOME_DEC_PIN  A2
+#define LIMIT_ALT_PIN A3
 
 //#define abs(x) (((x) > 0) ? (x) : -(x))
 #define sign(x) (((x) > 0) ? 1 : -1)
@@ -97,7 +97,6 @@ struct AxisCoords {
 ScopeState state = ST_IDLE;
 ScopeEvent event = EV_NONE;
 
-LocalCoords home_position = {0, M_PI/2};            // Home postion
 Location location = {0, 0};      // Default location
 uint8_t tracking_mode = 0;
 uint32_t ref_t = 0;    // millis() at last cmdSetTime call
@@ -110,8 +109,8 @@ bool parked = false;
 EqCoords target = {0};
 
 // Addresses in EEPROM/Flash
-int addr_location = 0;
-int addr_home = addr_location + sizeof(Location);
+#define ADDR_LOCATION 0
+#define ADDR_HOME 2*4
 
 SerialCommand sCmd;
 NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT, AUX_BUSY);
@@ -196,8 +195,10 @@ PierSide getPierSide()
 // Convert mechanical coordinates to local coordinates (HA/dec)
 void axisToLocalCoords(AxisCoords ac, LocalCoords *lc)
 {
+    //lc->ha = ac.ra + M_PI/2*(sign(ac.dec) - 1);
+    //lc->dec = M_PI/2 - abs(ac.dec);
     lc->ha = ac.ra + M_PI/2*(sign(ac.dec) - 1);
-    lc->dec = M_PI/2 - abs(ac.dec);
+    lc->dec = abs(ac.dec);
 }
 
 // Convert local coordinates (HA/dec) to mechanical coordinates
@@ -342,6 +343,55 @@ bool checkMeridianFlip(EqCoords eq)
 
     // A meridian flip is required if both angles have different sign
     return target_side != current_side;
+}
+
+void readLocation(Location *loc)
+{
+#ifdef __arm__
+    byte *b1 = FS.readAddress(ADDR_LOCATION);
+    memcpy(loc, b1, sizeof(Location));
+#else
+    EEPROM.get(ADDR_LOCATION, *loc);
+#endif
+}
+
+// Store the location in EEPROM
+void writeLocation(Location loc)
+{
+#ifdef __arm__
+    byte b[sizeof(Location)];
+    memcpy(b, &loc, sizeof(Location));
+    FS.write(ADDR_LOCATION, b, sizeof(Location));
+#else
+    EEPROM.put(ADDR_LOCATION, loc);
+#endif
+}
+
+// Read the home position from EEPROM
+void readHomePosition(AxisCoords *ac)
+{
+#ifdef __arm__
+    byte *b2 = FS.readAddress(ADDR_HOME);
+    memcpy(ac, b2, sizeof(LocalCoords));
+#else
+    EEPROM.get(ADDR_HOME, *ac);
+#endif
+}
+
+// Save current axis coordinates as the home position
+void writeHomePosition()
+{
+    AxisCoords ac;
+    getAxisCoords(&ac);
+
+    // Store the home position in EEPROM
+#ifdef __arm__
+    byte b[sizeof(AxisCoords)];
+    memcpy(b, &ac, sizeof(AxisCoords));
+    FS.write(ADDR_HOME, b, sizeof(AxisCoords));
+#else
+    EEPROM.put(ADDR_HOME, ac);
+#endif
 }
 
 /*****************************************************************************
@@ -558,14 +608,7 @@ void cmdSetLocation(char *cmd)
         ref_lst = getLST(now(), location);
         synced = false;
 
-        // Store the location in EEPROM
-#ifdef __arm__
-        byte b[sizeof(Location)];
-        memcpy(b, &location, sizeof(Location));
-        FS.write(addr_location, b, sizeof(Location));
-#else
-        EEPROM.put(addr_location, location);
-#endif
+	writeLocation(location);
     }
 
     Serial.write('#');
@@ -662,28 +705,6 @@ void cmdWakeup(char *cmd)
     Serial.write('#');
 }
 
-void cmdSyncHomePosition(char *cmd)
-{
-    LocalCoords lc;
-    getLocalCoords(&lc);
-    home_position.ha = lc.ha;
-    home_position.dec = lc.dec;
-
-    // Store the home position in EEPROM
-#ifdef __arm__
-    byte b[sizeof(LocalCoords)];
-    memcpy(b, &home_position, sizeof(LocalCoords));
-    FS.write(addr_home, b, sizeof(LocalCoords));
-#else
-    EEPROM.put(addr_home, home_position);
-#endif
-
-    DEBUG_FLOAT(home_position.ha);
-    DEBUG_FLOAT(home_position.dec);
-
-    Serial.write('#');
-}
-
 void setup()
 {
     // Map serial commands to functions
@@ -724,8 +745,6 @@ void setup()
     sCmd.addCommand('x', 1, cmdHibernate);
     sCmd.addCommand('y', 1, cmdWakeup);
 
-    sCmd.addCommand('i', 1, cmdSyncHomePosition);
-
     pinMode(AUX_SELECT, OUTPUT);
     //pinMode(LED_BUILTIN, OUTPUT);
     pinMode(LED_STATUS_R, OUTPUT);
@@ -735,9 +754,9 @@ void setup()
     pinMode(LED_YELLOW, OUTPUT);
 
     pinMode(HOME_BUTTON, INPUT_PULLUP);
-    pinMode(PARK_BUTTON, INPUT_PULLUP);
+    pinMode(ABORT_BUTTON, INPUT_PULLUP);
     pinMode(LIMIT_RA_PIN, INPUT_PULLUP);
-    pinMode(LIMIT_DEC_PIN, INPUT_PULLUP);
+    pinMode(LIMIT_ALT_PIN, INPUT_PULLUP);
 
 #ifdef DEBUG
     debug.begin(9600);
@@ -746,16 +765,15 @@ void setup()
     nexstar.init();
 
     // read location and home position from EEPROM
-#ifdef __arm__
-    byte *b1 = FS.readAddress(addr_location);
-    memcpy(&location, b1, sizeof(Location));
-    byte *b2 = FS.readAddress(addr_home);
-    memcpy(&home_position, b2, sizeof(LocalCoords));
-#else
-    EEPROM.get(addr_location, location);
-    EEPROM.get(addr_home, home_position);
-#endif
-    setLocalCoords(home_position);
+    readLocation(&location);
+
+    //AxisCoords home_pos;
+    //readHomePosition(&home_pos);
+    AxisCoords home_pos={M_PI/2, M_PI/2};
+    setAxisCoords(home_pos);
+
+    nexstar.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
+    nexstar.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
 }
 
 // Update the scope status with a simple state machine
@@ -919,7 +937,13 @@ void updateFSM()
             }
 
             if (ra_homed && dec_homed) {
-                setLocalCoords(home_position);
+                if (synced)
+                    writeHomePosition();
+                else {
+                    AxisCoords home_pos={M_PI/2, M_PI/2};
+                    //readHomePosition(&home_pos);
+                    setAxisCoords(home_pos);
+                }
                 synced = true;
                 aligned = true;
                 state = ST_IDLE;
@@ -950,10 +974,10 @@ void updateLEDs()
 
 void loop()
 {
-    if (!digitalRead(HOME_BUTTON))
-        event = EV_HOME;
-    else if (!digitalRead(PARK_BUTTON))
+    if (!digitalRead(ABORT_BUTTON) && state != ST_IDLE)
         event = EV_ABORT;
+    else if (!digitalRead(HOME_BUTTON) && state != ST_HOMING_DEC)
+        event = EV_HOME;
 
     sCmd.readSerial();
     updateFSM();
