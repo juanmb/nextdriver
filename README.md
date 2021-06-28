@@ -94,6 +94,7 @@ in order to build the Arduino firmware and upload it to the board.
 
 Test the code in your computer (it does not require an Arduino board):
 
+    pio platform install native
     pio test -e native
 
 Build the firmware for Arduino UNO (default target):
