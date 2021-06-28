@@ -1,92 +1,110 @@
-# NexStar Controller
+# NextDriver
 
-A USB controller for [Celestron](https://www.celestron.com/collections/astronomy)
-telescopes using the NexStar AUX protocol.
+An Arduino-based controller for Celestron CG5-series equatorial mounts.
 
-![](images/nexstar_adapter1.jpg)
+## Disclaimer
 
+:warning: **This is a work in progress!** :warning:
+
+No stable version was released yet, so you can expect some critical bugs to occur.
+It shouldn't be used in unattended telescopes!
+
+Currently NextDriver was tested only with [KStars/Ekos](https://www.indilib.org/about/ekos.html)
+using the [Celestron NexStar](https://www.indilib.org/telescopes/celestron/celestron-nexstar.html) INDI driver to control a
+[Celestron CG-5 GT Advanced Series](https://s3.amazonaws.com/celestron-site-support-files/support_files/1196122269_cg5mount9151791.pdf) mount.
 
 ## Description
 
-This is a USB controller for Celestron NexStar AUX protocol implemented in Arduino.
-It substitutes the hand controller, receiving the commands from the PC (HC procotol)
-and communicating with the mount (AUX protocol).
+NextDriver is a USB controller for the Celestron NexStar AUX protocol
+implemented in Arduino. The Arduino replaces the hand controller, receiving
+the commands from the PC (HC procotol) and controlling the mount (AUX protocol).
+
+With **NextDriver** you won't need a hand control to control your Celestron mount anymore.
+It allows a fully remote operation of the mount by removing the tedious manual startup proceeding.
 
 ![](images/block_diagram.png)
 
 Documentation on the NexStar HC and Aux protocols:
+- [NexStar HC Protocol](http://www.nexstarsite.com/download/manuals/NexStarCommunicationProtocolV1.2.zip)
+- [NexStar AUX Protocol](http://www.paquettefamily.ca/nexstar/NexStar_AUX_Commands_10.pdf)
 
- * [NexStar HC Protocol](http://www.nexstarsite.com/download/manuals/NexStarCommunicationProtocolV1.2.zip)
- * [NexStar AUX Protocol](http://www.paquettefamily.ca/nexstar/NexStar_AUX_Commands_10.pdf)
+### LEDs
+- Dual color red-green status LED:
+    - Red: time not set
+    - Yellow: time set. no synced/aligned
+    - Green: synced/aligned
+- Green LED: slewing
+- Red LED: Error (limits, communication)
+- Yellow: not used yet
 
+## Hardware
+
+![](images/nextdriver_schematic.png)
+
+Required parts:
+- Arduino UNO
+- [Prototype Expansion Board for Arduino UNO](https://www.aliexpress.com/item/33045177683.html)
+- Infrared sensor modules. You can build the circuit shown in the schematics or
+  you can buy [already-built modules](https://www.aliexpress.com/item/32886394063.html)
+- [Limit switch](https://www.aliexpress.com/item/4001033375208.html) for RA axis
+- [Tilt switch](https://www.aliexpress.com/item/33040347015.html) for declination axis
+- [6P6C female connector](https://www.aliexpress.com/item/33041450076.html)
+- [RJ12 male to male cable](https://www.aliexpress.com/item/1005001412508363.html)
+- 1N4148 (or similar) diode
+- Red, green, yellow LEDs
+- Dual red-green LED
+- Resistors (shown in the schematics)
 
 ## Features
 
- * Get/set location and time
- * Sync
- * Goto (equatorial and horizontal coordinates)
- * Tracking on/off
- * Meridian flip
- * Above-the-horizon limit
+- **Home (index) sensors** to allow remote startup without requiring manual alignment
+- **Limit sensors** to avoid collisions beween the telescope and the mount
+- Automatic **meridian flip** when slewing to a target
+- Home and abort buttons
+- Status LEDs
 
-TODO:
+Supported HC commands:
+  - GetEqCoords
+  - GetAzCoords
+  - GetPierSide
+  - SyncEqCoords
+  - GotoEqCoords
+  - GotoAzCoords
+  - GotoInProgress
+  - CancelGoto
+  - IsAligned
+  - SetTrackingMode
+  - GetTrackingMode
+  - SetLocation
+  - GetLocation
+  - SetTime
+  - GetTime
+  - GetVersion
+  - GetVariant
+  - GetModel
+  - Hibernate (not working yet)
+  - Wakeup
+  - Echo
+  - PassThrough
 
- * RTC support
- * Homing switches
- * Hibernate/wakeup
- * Support for South hemisphere
- * Support for alt-az mounts
+## Building
 
+The code is built using [PlatformIO](https://platformio.org/), so you'll need to install it
+in order to build the Arduino firmware and upload it to the board.
 
-## Limitations
+Test the code in your computer (it does not require an Arduino board):
 
-Currently, only equatorial mounts in the North hemisphere are supported.
+    pio test -e native
 
+Build the firmware for Arduino UNO (default target):
 
-## Required libraries
+    pio run
 
- * [Time](https://github.com/PaulStoffregen/Time)
- * [AccelStepper](https://github.com/waspinator/AccelStepper.git)
+Program the board:
 
-The library AstroLib, wich is part of this project, must be installed in the
-Arduino libraries directory.
-
-
-## Compiling
-
-The provided Makefile requires [Arduino-Makefile](https://github.com/sudar/Arduino-Makefile)
-to work. In Debian/Ubuntu/Mint, you can install it with
-
-    sudo apt install arduino-mk
-
-If you downloaded `Arduino-Makefile` to a custom location (other than
-`/usr/share/arduino`), you must indicate the correct directory by modifying
-the `ARDMK_DIR` variable in the `Makefile.avr` or `Makefile.sam`.
-
-The code can be compiled and uploaded to the Arduino board using
-
-    make
-    make upload
-
-Of course, you can also program the Arduino board using the Arduino IDE.
-
-### Compiling for Arduino Due
-
-Download the toolchain for SAM boards using the Boards Manager in the Arduino IDE.
-
-Comment the line `include Makefile.avr` and discomment the line
-`include Makefile.sam` in the `Makefile`.
-
-## Schematics
-
-![](images/aux_connector.png)
-
-![](images/circuit.png)
+    pio run -t upload
 
 
-## Enclosure
+## Current limitations
 
-The CAD directory contains an STL model of the enclosure I use, which was
-created with openSCAD. It requires an Arduino Nano and a small prototype
-board. The resistor, the diode and the modular connector shown in the
-schematics are mounted in the prototype board.
+Currently, only CG-5 mounts in the North hemisphere are supported.

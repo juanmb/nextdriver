@@ -1,8 +1,8 @@
 /******************************************************************
     Author:     Juan Menendez Blanco    <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
 *******************************************************************/
 
@@ -10,8 +10,9 @@
 #include "serial_command.h"
 
 
-SerialCommand::SerialCommand()
+SerialCommand::SerialCommand(Stream *dev)
 {
+    stream = dev;
     nCommands = 0;
     cmdSize = 0;
     bufPos = 0;
@@ -32,8 +33,8 @@ int SerialCommand::addCommand(const char firstChar, uint8_t size, cbFunction fun
 
 void SerialCommand::readSerial()
 {
-    while (Serial.available()) {
-        char c = Serial.read();
+    while (stream->available()) {
+        char c = stream->read();
 
         if (bufPos == 0) {
             cmdSize = 0;

@@ -1,8 +1,8 @@
 /******************************************************************
     Author:     Juan Menendez Blanco    <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
 *******************************************************************/
 
@@ -82,7 +82,7 @@
 
 
 void uint32To24bits(uint32_t in, char *out);
-uint32_t uint32From24bits(char *data);
+uint32_t uint32From24bits(const char *data);
 
 
 typedef struct NexStarHeader {

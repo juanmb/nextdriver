@@ -1,8 +1,8 @@
 /******************************************************************
     Author:     Juan Menendez Blanco    <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
 *******************************************************************/
 
@@ -23,7 +23,7 @@ void uint32To24bits(uint32_t in, char *out)
 
 
 // The char array {0x12, 0x34, 0x56} will be converted into 0x12345600
-uint32_t uint32From24bits(char *data)
+uint32_t uint32From24bits(const char *data)
 {
     uint32_t out = 0;
 

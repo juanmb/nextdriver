@@ -1,8 +1,8 @@
 /******************************************************************
     Author:     Juan Menendez Blanco    <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
 *******************************************************************/
 
@@ -27,10 +27,11 @@ typedef struct commandCallback {
 
 class SerialCommand {
 public:
-    SerialCommand();
+    SerialCommand(Stream *device);
     void readSerial();
     int addCommand(const char, uint8_t, cbFunction);
 private:
+    Stream *stream;
     commandCallback commandList[MAX_COMMANDS];
     char buffer[MAX_CMD_SIZE];
     cbFunction cmdFunction;

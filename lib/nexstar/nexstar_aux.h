@@ -1,8 +1,8 @@
 /******************************************************************
     Author:     Juan Menendez Blanco    <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
     This code is based on Andre Paquette's documentation about
     the NexStar AUX protocol:
@@ -15,10 +15,19 @@
 
 #include "nexstar_base.h"
 
+#define AUX_BAUDRATE 19200
+
+// Convert between nexstar angle format and radians
+float nex2rad(uint16_t angle);
+float pnex2rad(uint32_t angle);
+uint16_t rad2nex(float rad);
+uint32_t rad2pnex(float rad);
+
 
 class NexStarAux : public NexStarBase {
 public:
-    NexStarAux(int rx, int tx, int select);
+    //NexStarAux(int rx, int tx, int select, int busy);
+    NexStarAux(Stream *serial, int select, int busy);
     void init();
 
     int setPosition(uint8_t dest, uint32_t pos);
@@ -50,7 +59,9 @@ private:
     int newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
             uint8_t size, char* data);
 
+    Stream *serial;
     int select_pin;
+    int busy_pin;
 };
 
 #endif

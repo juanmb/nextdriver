@@ -1,21 +1,21 @@
 /******************************************************************
     Author: Juan Menendez <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
 ********************************************************************/
 
-#ifdef __AVR__
+#include <Arduino.h>
+#ifdef TARGET_DUE
+#include <DueFlashStorage.h>
+#else
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
-#else
-#include <DueFlashStorage.h>
 #endif
 #include <TimeLib.h>
 #include "serial_command.h"
 #include "nexstar_aux.h"
-#include "nexstar_stepper.h"
 #include "AstroLib.h"
 
 #define VERSION_MAJOR 4
@@ -25,34 +25,39 @@
 #define BAUDRATE 9600
 #define GO_BELOW_HORIZON
 #define ENABLE_HOMING
-//#define DEBUG
 
-// pin definitions
-#define AUX_SELECT 5
-#define AUX_RX 6
-#define AUX_TX 7
-#define DEBUG_TX 2
-//#define BUTTON 3
-#define HOME_DEC_PIN A6
-#define HOME_RA_PIN A7
+///////////////////////////////////////////
+// Pin definitions
+///////////////////////////////////////////
 
-//#define abs(x) (((x) > 0) ? (x) : -(x))
-#define sign(x) (((x) > 0) ? 1 : -1)
+#ifdef SIMPLE_AUX_INTERFACE
+// Use a simple interface circuit containing only a resistor and a diode
+#define AUX_BUSY   3
+#else
+// Use a more elaborate interface circuit built around a 74LS125
+#define AUX_BUSY   2
+#endif
+#define AUX_SELECT 3
+#define AUX_TX     4
+#define AUX_RX     5
+
+#define LED_STATUS_G 12 // synced/homed
+#define LED_STATUS_R 13 // no time set
+#define LED_RED      11 // error
+#define LED_GREEN    10 // slewing
+#define LED_YELLOW    9 // parked
+
+#define HOME_BUTTON   7
+#define ABORT_BUTTON   8
+#define HOME_RA_PIN   A0
+#define LIMIT_RA_PIN  A1
+#define HOME_DEC_PIN  A2
+#define LIMIT_ALT_PIN A3
+
+#define ABS(a) ((a) < 0 ? -(a) : (a))
 
 #define decHomeSensor() (analogRead(HOME_DEC_PIN) > 512) // true if blocked
 #define raHomeSensor() (analogRead(HOME_RA_PIN) > 512)   // true if blocked
-
-#ifdef DEBUG
-#define DEBUG_PRINT(x) debug.println(x)
-#define DEBUG_FLOAT(x) debug.println(x, 6)
-#else
-#define DEBUG_PRINT(x) do {} while(0)
-#define DEBUG_FLOAT(x) do {} while(0)
-#endif
-
-#ifdef __arm__
-DueFlashStorage FS;
-#endif
 
 enum ScopeState {
     ST_IDLE,
@@ -74,153 +79,58 @@ enum ScopeEvent {
 };
 
 enum PierSide {
-    PIER_EAST,  // Mount on the east side of pier (looking west). Normal state
-    PIER_WEST,  // Mount on the west side of pier (looking east)
-};
-
-struct AxisCoords {
-    float ra;
-    float dec;
+    PIER_EAST,  // Telescope on the east side of pier (looking west)
+    PIER_WEST,  // Telescope on the west side of pier (looking east)
 };
 
 ScopeState state = ST_IDLE;
 ScopeEvent event = EV_NONE;
 
-LocalCoords home_position = {0, M_PI/2};            // Home postion
+// Position of the home (or index) sensors in axis coordinates.
+// For now, we assume the sensors are always at exactly pi/2, pi/2:
+// the telescope looking at the pole and the counterweight pointing downwards
+const AxisCoords home_pos = {M_PI/2, M_PI/2};
+
 Location location = {0, 0};      // Default location
 uint8_t tracking_mode = 0;
 uint32_t ref_t = 0;    // millis() at last cmdSetTime call
-double ref_lst = 0.0;  // Last synced LST
-double ref_jd = 0.0;   // Last synced julian date refered to J2000
+float ref_lst = 0.0;  // Last synced LST
+float ref_jd = 0.0;   // Last synced julian date refered to J2000
 bool synced = false;
+bool time_set = false;
+bool aligned = false;
+bool parked = false;
 EqCoords target = {0};
 
 // Addresses in EEPROM/Flash
-int addr_location = 0;
-int addr_home = addr_location + sizeof(Location);
+#define ADDR_LOCATION 0
+#define ADDR_HOME 2*4
+#define ADDR_TRACKING 2*4
 
-SerialCommand sCmd;
-NexStarAux nexstar(AUX_RX, AUX_TX, AUX_SELECT);
-//NexStarStepper nexstar;
-
-#ifdef DEBUG
-SoftwareSerial debug(4, 2);
+#ifdef TARGET_DUE
+#define aux Serial1
+DueFlashStorage FS;
+#else
+SoftwareSerial aux(AUX_RX, AUX_TX);
 #endif
 
+NexStarAux nexstar(&aux, AUX_SELECT, AUX_BUSY);
+SerialCommand sCmd(&Serial);
+
+
+/*
 // Get current Julian date
-//static double getCurrentJD()
-//{
-    //return ref_jd + (double)(now() - ref_t)/(24.0*60*60);
-//}
-
-double normalizeAngle2pi(double h)
+static float getCurrentJD()
 {
-    int ih = (int)(h/2/M_PI);
-    h = h - (double)ih*2*M_PI;
-    return h < 0 ? h + 2*M_PI : h;
+    return ref_jd + (float)(now() - ref_t)/(24.0*60*60);
 }
-
-// Normalize an angle in radians between -pi and pi
-double normalizeAngle(double h)
-{
-    h = normalizeAngle2pi(h);
-    int ih = (int)(h/2/M_PI);
-    h = h - (double)ih*2*M_PI;
-    return h > M_PI ? h - 2*M_PI: h;
-}
+*/
 
 // Obtain current Local Sidereal Time from last synced time
 // This is faster than performing the full calculation from JD & location
 // by calling getLST()
-double getCurrentLST() {
-    return ref_lst + 2*M_PI*(double)(now() - ref_t)/(24.0*60*60);
-}
-
-// Convert nexstar angle format to radians
-double nex2rad(uint16_t angle)
-{
-    return 2*M_PI*((double)angle / 0x10000);
-}
-
-// Convert nexstar precise angle format to radians
-double pnex2rad(uint32_t angle)
-{
-    return 2*M_PI*((double)angle / 0x100000000);
-}
-
-// Convert radians to nexstar angle format
-uint16_t rad2nex(double rad)
-{
-    return (uint16_t)(rad * 0x10000 / (2*M_PI));
-}
-
-// Convert radians to nexstar precise angle format
-uint32_t rad2pnex(double rad)
-{
-    return (uint32_t)(rad * 0x100000000 / (2*M_PI));
-}
-
-/*****************************************************************************
-  Coordinate conversions
-******************************************************************************/
-
-// Indicates the pointing state of the mount at a given position
-// Reference: https://ascom-standards.org/Help/Platform/html/P_ASCOM_DeviceInterface_ITelescopeV3_SideOfPier.htm
-PierSide getPierSide(AxisCoords ac)
-{
-    return normalizeAngle(ac.dec) < 0 ? PIER_WEST : PIER_EAST;
-}
-
-PierSide getPierSide()
-{
-    uint32_t int_dec;
-    nexstar.getPosition(DEV_DEC, &int_dec);
-    float dec = pnex2rad(int_dec);
-    return normalizeAngle(dec) < 0 ? PIER_WEST : PIER_EAST;
-}
-
-// Convert mechanical coordinates to local coordinates (HA/dec)
-void axisToLocalCoords(AxisCoords ac, LocalCoords *lc)
-{
-    lc->ha = ac.ra + M_PI/2*(sign(ac.dec) - 1);
-    lc->dec = M_PI/2 - abs(ac.dec);
-}
-
-// Convert local coordinates (HA/dec) to mechanical coordinates
-void localToAxisCoords(LocalCoords lc, AxisCoords *ac)
-{
-    ac->ra = lc.ha + M_PI/2*(1 - sign(lc.ha));
-    ac->dec = (M_PI/2 - lc.dec)*sign(lc.ha);
-}
-
-// Convert local coordinates to equatorial coordinates
-void localToEqCoords(LocalCoords lc, EqCoords *eq)
-{
-    eq->ra = normalizeAngle(getCurrentLST() - lc.ha);
-    eq->dec = lc.dec;
-}
-
-// Convert equatorial coordinates to local coordinates
-void eqToLocalCoords(EqCoords eq, LocalCoords *lc)
-{
-    lc->ha = normalizeAngle(getCurrentLST() - eq.ra);
-    lc->dec = eq.dec;
-}
-
-// Convert equatorial coordinates to mechanical coordinates
-void eqToAxisCoords(EqCoords eq, AxisCoords *ac)
-{
-    LocalCoords lc;
-    eqToLocalCoords(eq, &lc);
-    localToAxisCoords(lc, ac);
-}
-
-// Convert mechanical coordinates equatorial to coordinates
-void axisToEqCoords(AxisCoords ac, EqCoords *eq)
-{
-    LocalCoords lc;
-    axisToLocalCoords(ac, &lc);
-    localToEqCoords(lc, eq);
+float getCurrentLST() {
+    return ref_lst + 2*M_PI*(float)(now() - ref_t)/(24.0*60*60);
 }
 
 /*****************************************************************************
@@ -233,8 +143,8 @@ void getAxisCoords(AxisCoords *ac)
     nexstar.getPosition(DEV_RA, &ra);
     nexstar.getPosition(DEV_DEC, &dec);
 
-    ac->ra = normalizeAngle(pnex2rad(ra));
-    ac->dec = normalizeAngle(pnex2rad(dec));
+    ac->ra = normalizePi(pnex2rad(ra));
+    ac->dec = normalizePi(pnex2rad(dec));
 }
 
 void getLocalCoords(LocalCoords *lc)
@@ -246,15 +156,9 @@ void getLocalCoords(LocalCoords *lc)
 
 void getEqCoords(EqCoords *eq)
 {
-    /*
-    if (!synced) {
-        *eq = {0, 0};
-        return;
-    }
-    */
     LocalCoords lc;
     getLocalCoords(&lc);
-    localToEqCoords(lc, eq);
+    localToEqCoords(lc, getCurrentLST(), eq);
 }
 
 void getHorizCoords(HorizCoords *hc)
@@ -264,28 +168,28 @@ void getHorizCoords(HorizCoords *hc)
     localToHoriz(location, lc, hc);
 }
 
-void setAxisCoords(AxisCoords ac)
+void setAxisCoords(const AxisCoords ac)
 {
     nexstar.setPosition(DEV_RA, rad2pnex(ac.ra));
     nexstar.setPosition(DEV_DEC, rad2pnex(ac.dec));
     synced = true;
 }
 
-void setLocalCoords(LocalCoords lc)
+void setLocalCoords(const LocalCoords lc)
 {
     AxisCoords ac;
     localToAxisCoords(lc, &ac);
     setAxisCoords(ac);
 }
 
-void setEqCoords(EqCoords eq)
+void setEqCoords(const EqCoords eq)
 {
     AxisCoords ac;
-    eqToAxisCoords(eq, &ac);
+    eqToAxisCoords(eq, getCurrentLST(), &ac);
     setAxisCoords(ac);
 }
 
-void gotoAxisCoords(AxisCoords ac, bool slow)
+void gotoAxisCoords(const AxisCoords ac, bool slow)
 {
     if (synced) {
         nexstar.gotoPosition(DEV_RA, slow, rad2pnex(ac.ra));
@@ -293,10 +197,10 @@ void gotoAxisCoords(AxisCoords ac, bool slow)
     }
 }
 
-void gotoEqCoords(EqCoords eq, bool slow)
+void gotoEqCoords(const EqCoords eq, bool slow)
 {
     AxisCoords ac;
-    eqToAxisCoords(eq, &ac);
+    eqToAxisCoords(eq, getCurrentLST(), &ac);
     gotoAxisCoords(ac, slow);
 }
 
@@ -316,18 +220,82 @@ bool slewDone()
     return ra_done && dec_done;
 }
 
+// Indicates the pointing state of the mount at a given position
+// Reference: https://ascom-standards.org/Help/Platform/html/P_ASCOM_DeviceInterface_ITelescopeV3_SideOfPier.htm
+PierSide getPierSide(AxisCoords ac)
+{
+    float dec = normalizePi(ac.dec);
+    return ABS(dec) <= M_PI/2 ? PIER_WEST : PIER_EAST;
+}
+
+PierSide getPierSide()
+{
+    AxisCoords ac;
+    getAxisCoords(&ac);
+    return getPierSide(ac);
+}
+
 // Check if a meridian flip is required
 bool checkMeridianFlip(EqCoords eq)
 {
     AxisCoords ac;
     PierSide target_side, current_side;
 
-    eqToAxisCoords(eq, &ac);
+    eqToAxisCoords(eq, getCurrentLST(), &ac);
     target_side = getPierSide(ac);
     current_side = getPierSide();
 
     // A meridian flip is required if both angles have different sign
     return target_side != current_side;
+}
+
+void readLocation(Location *loc)
+{
+#ifdef __arm__
+    byte *b1 = FS.readAddress(ADDR_LOCATION);
+    memcpy(loc, b1, sizeof(Location));
+#else
+    EEPROM.get(ADDR_LOCATION, *loc);
+#endif
+}
+
+// Store the location in EEPROM
+void writeLocation(Location loc)
+{
+#ifdef __arm__
+    byte b[sizeof(Location)];
+    memcpy(b, &loc, sizeof(Location));
+    FS.write(ADDR_LOCATION, b, sizeof(Location));
+#else
+    EEPROM.put(ADDR_LOCATION, loc);
+#endif
+}
+
+// Read the position of the index sensors from EEPROM.
+void readHomePosition(AxisCoords *ac)
+{
+#ifdef __arm__
+    byte *b2 = FS.readAddress(ADDR_HOME);
+    memcpy(ac, b2, sizeof(LocalCoords));
+#else
+    EEPROM.get(ADDR_HOME, *ac);
+#endif
+}
+
+// Save current axis coordinates as the home position
+void writeHomePosition()
+{
+    AxisCoords ac;
+    getAxisCoords(&ac);
+
+    // Store the home position in EEPROM
+#ifdef __arm__
+    byte b[sizeof(AxisCoords)];
+    memcpy(b, &ac, sizeof(AxisCoords));
+    FS.write(ADDR_HOME, b, sizeof(AxisCoords));
+#else
+    EEPROM.put(ADDR_HOME, ac);
+#endif
 }
 
 /*****************************************************************************
@@ -376,7 +344,7 @@ void cmdSyncEqCoords(char *cmd)
     EqCoords eq;
 
     if (cmd[0] == 'S') {
-        uint16_t ra, dec;
+        short unsigned int ra, dec;
         sscanf(cmd + 1, "%4hx,%4hx", &ra, &dec);
         eq.ra = nex2rad(ra);
         eq.dec = nex2rad(dec);
@@ -396,15 +364,31 @@ void cmdGotoEqCoords(char *cmd)
     EqCoords eq;
 
     if (cmd[0] == 'R') {
-        uint16_t ra, dec;
+        short unsigned int ra, dec;
         sscanf(cmd + 1, "%4hx,%4hx", &ra, &dec);
         eq.ra = nex2rad(ra);
         eq.dec = nex2rad(dec);
+#ifdef ENABLE_HOMING
+        // Home the mount if dec=pi/2
+        if (dec == 0x4000) {
+            event = EV_HOME;
+            Serial.write('#');
+            return;
+        }
+#endif
     } else {
         uint32_t ra, dec;
         sscanf(cmd + 1, "%8lx,%8lx", &ra, &dec);
         eq.ra = pnex2rad(ra);
         eq.dec = pnex2rad(dec);
+#ifdef ENABLE_HOMING
+        // Home the mount if dec=pi/2
+        if (dec == 0x40000000) {
+            event = EV_HOME;
+            Serial.write('#');
+            return;
+        }
+#endif
     }
 
 #ifdef GO_BELOW_HORIZON
@@ -433,7 +417,7 @@ void cmdGotoAzCoords(char *cmd)
     HorizCoords hc;
 
     if (cmd[0] == 'B') {
-        uint16_t az, alt;
+        short unsigned int az, alt;
         sscanf(cmd + 1, "%4hx,%4hx", &az, &alt);
         hc.az = nex2rad(az);
         hc.alt = nex2rad(alt);
@@ -448,16 +432,15 @@ void cmdGotoAzCoords(char *cmd)
         // If target is above the horizon, go
         LocalCoords lc;
         horizToLocal(location, hc, &lc);
-        localToEqCoords(lc, &target);
+        localToEqCoords(lc, getCurrentLST(), &target);
         event = EV_GOTO;
-
-#ifdef ENABLE_HOMING
-        // Home the mount if az=0, alt=0
-        if (hc.az == 0 && hc.alt == 0) {
-            event = EV_HOME;
-        }
-#endif
     }
+    Serial.write('#');
+}
+
+void cmdIsAligned(char *cmd)
+{
+    Serial.write(aligned ? 1 : 0);
     Serial.write('#');
 }
 
@@ -502,13 +485,13 @@ void cmdGetLocation(char *cmd)
 {
     SxAngle sxLat, sxLong;
 
-    rad2sx(location.latitude, &sxLat);
+    rad2sx(normalizePi(location.lat), &sxLat);
     Serial.write(sxLat.deg);
     Serial.write(sxLat.min);
     Serial.write(sxLat.sec);
     Serial.write(sxLat.sign);
 
-    rad2sx(location.longitude, &sxLong);
+    rad2sx(normalizePi(location.lon), &sxLong);
     Serial.write(sxLong.deg);
     Serial.write(sxLong.min);
     Serial.write(sxLong.sec);
@@ -528,24 +511,17 @@ void cmdSetLocation(char *cmd)
         (uint8_t)cmd[7], (uint8_t)cmd[8]
     };
 
-    float lat = sx2rad(latitude);
-    float lon = sx2rad(longitude);
+    float lat = normalizePi(sx2rad(latitude));
+    float lon = normalizePi(sx2rad(longitude));
 
-    if ((lat != location.latitude) || (lon != location.longitude)) {
-        location.latitude = sx2rad(latitude);
-        location.longitude = sx2rad(longitude);
+    if ((lat != location.lat) || (lon != location.lon)) {
+        location.lat = lat;
+        location.lon = lon;
 
         ref_lst = getLST(now(), location);
         synced = false;
 
-        // Store the location in EEPROM
-#ifdef __arm__
-	byte b[sizeof(Location)];
-	memcpy(b, &location, sizeof(Location));
-	FS.write(addr_location, b, sizeof(Location));
-#else
-        EEPROM.put(addr_location, location);
-#endif
+	writeLocation(location);
     }
 
     Serial.write('#');
@@ -567,6 +543,7 @@ void cmdSetTime(char *cmd)
 
     ref_t = now();
     ref_lst = getLST(ref_t, location);
+    time_set = true;
     synced = false;
 
     Serial.write('#');
@@ -641,28 +618,6 @@ void cmdWakeup(char *cmd)
     Serial.write('#');
 }
 
-void cmdSyncHomePosition(char *cmd)
-{
-    LocalCoords lc;
-    getLocalCoords(&lc);
-    home_position.ha = lc.ha;
-    home_position.dec = lc.dec;
-
-    // Store the home position in EEPROM
-#ifdef __arm__
-    byte b[sizeof(LocalCoords)];
-    memcpy(b, &home_position, sizeof(LocalCoords));
-    FS.write(addr_home, b, sizeof(LocalCoords));
-#else
-    EEPROM.put(addr_home, home_position);
-#endif
-
-    DEBUG_FLOAT(home_position.ha);
-    DEBUG_FLOAT(home_position.dec);
-
-    Serial.write('#');
-}
-
 void setup()
 {
     // Map serial commands to functions
@@ -683,6 +638,7 @@ void setup()
 
     sCmd.addCommand('L', 1, cmdGotoInProgress);
     sCmd.addCommand('M', 1, cmdCancelGoto);
+    sCmd.addCommand('J', 1, cmdIsAligned);
 
     sCmd.addCommand('T', 2, cmdSetTrackingMode);
     sCmd.addCommand('t', 1, cmdGetTrackingMode);
@@ -698,33 +654,34 @@ void setup()
     sCmd.addCommand('m', 1, cmdGetModel);
     sCmd.addCommand('K', 2, cmdEcho);
 
-    //sCmd.addCommand('J', 1, cmdAlignmentComplete);
     sCmd.addCommand('x', 1, cmdHibernate);
     sCmd.addCommand('y', 1, cmdWakeup);
 
-    sCmd.addCommand('i', 1, cmdSyncHomePosition);
-
     pinMode(AUX_SELECT, OUTPUT);
-    pinMode(LED_BUILTIN, OUTPUT);
-    //pinMode(BUTTON, INPUT_PULLUP);
+    //pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(LED_STATUS_R, OUTPUT);
+    pinMode(LED_STATUS_G, OUTPUT);
+    pinMode(LED_RED, OUTPUT);
+    pinMode(LED_GREEN, OUTPUT);
+    pinMode(LED_YELLOW, OUTPUT);
 
-#ifdef DEBUG
-    debug.begin(9600);
-#endif
+    pinMode(HOME_BUTTON, INPUT_PULLUP);
+    pinMode(ABORT_BUTTON, INPUT_PULLUP);
+    pinMode(LIMIT_RA_PIN, INPUT_PULLUP);
+    pinMode(LIMIT_ALT_PIN, INPUT_PULLUP);
+
+    aux.begin(AUX_BAUDRATE);
+
     Serial.begin(BAUDRATE);
     nexstar.init();
 
-    // read location and home position from EEPROM
-#ifdef __arm__
-    byte *b1 = FS.readAddress(addr_location);
-    memcpy(&location, b1, sizeof(Location));
-    byte *b2 = FS.readAddress(addr_home);
-    memcpy(&home_position, b2, sizeof(LocalCoords));
-#else
-    EEPROM.get(addr_location, location);
-    EEPROM.get(addr_home, home_position);
-#endif
-    setLocalCoords(home_position);
+    // read the location from EEPROM
+    readLocation(&location);
+
+    setAxisCoords(home_pos);
+
+    nexstar.setGuiderate(DEV_RA, GUIDERATE_POS, true, 0);    // stop RA motor
+    nexstar.setGuiderate(DEV_DEC, GUIDERATE_POS, true, 0);   // stop DEC motor
 }
 
 // Update the scope status with a simple state machine
@@ -737,7 +694,6 @@ void updateFSM()
         stopMotors();
         state = ST_IDLE;
         event = EV_NONE;
-        DEBUG_PRINT("ST_IDLE");
         return;
     }
 
@@ -747,19 +703,18 @@ void updateFSM()
                 t_timer = millis();
                 if (checkMeridianFlip(target)) {
                     // go to the pole before flipping
-                    gotoAxisCoords((AxisCoords){M_PI/2, 0}, false);
+                    gotoAxisCoords((AxisCoords){M_PI/2, M_PI/2}, false);
                     state = ST_MERIDIAN_FLIP;
-                    DEBUG_PRINT("ST_MERIDIAN_FLIP");
                     break;
                 }
+                // TODO: home the mount if the target coords are (0, pi/2)
                 gotoEqCoords(target, false);
                 state = ST_SLEWING_FAST;
-                DEBUG_PRINT("ST_SLEWING_FAST");
             } else if (event == EV_HOME) {
                 dec_homing_dir = !decHomeSensor();
                 nexstar.move(DEV_DEC, dec_homing_dir, 9);
+                aligned = false;
                 state = ST_HOMING_DEC;
-                DEBUG_PRINT("ST_HOMING_DEC");
             }
             break;
 
@@ -771,7 +726,6 @@ void updateFSM()
                 if (slewDone()) {
                     gotoEqCoords(target, false);
                     state = ST_SLEWING_FAST;
-                    DEBUG_PRINT("ST_SLEWING_FAST");
                 }
             }
             break;
@@ -784,7 +738,6 @@ void updateFSM()
                 if (slewDone()) {
                     gotoEqCoords(target, true);
                     state = ST_SLEWING_SLOW;
-                    DEBUG_PRINT("ST_SLEWING_SLOW");
                 }
             }
             break;
@@ -796,7 +749,6 @@ void updateFSM()
 
                 if (slewDone()) {
                     state = ST_IDLE;
-                    DEBUG_PRINT("ST_IDLE");
                 }
             }
             break;
@@ -809,7 +761,6 @@ void updateFSM()
                 ra_homed = 0;
                 dec_homed = 0;
                 state = ST_HOMING_FAST1;
-                DEBUG_PRINT("ST_HOMING_FAST1");
             }
             break;
 
@@ -830,7 +781,6 @@ void updateFSM()
                 nexstar.move(DEV_DEC, 1, 9);
                 nexstar.move(DEV_RA, 1, 9);
                 state = ST_HOMING_FAST2;
-                DEBUG_PRINT("ST_HOMING_FAST2");
             }
             break;
 
@@ -851,7 +801,6 @@ void updateFSM()
                 nexstar.move(DEV_DEC, 0, 6);
                 nexstar.move(DEV_RA, 0, 6);
                 state = ST_HOMING_SLOW1;
-                DEBUG_PRINT("ST_HOMING_SLOW1");
             }
             break;
 
@@ -872,7 +821,6 @@ void updateFSM()
                 nexstar.move(DEV_DEC, 1, 4);
                 nexstar.move(DEV_RA, 1, 4);
                 state = ST_HOMING_SLOW2;
-                DEBUG_PRINT("ST_HOMING_SLOW2");
             }
             break;
 
@@ -887,10 +835,10 @@ void updateFSM()
             }
 
             if (ra_homed && dec_homed) {
-                setLocalCoords(home_position);
-                synced = true;
+                setAxisCoords(home_pos);
+
+                aligned = true;
                 state = ST_IDLE;
-                DEBUG_PRINT("ST_IDLE");
             }
             break;
     };
@@ -898,10 +846,32 @@ void updateFSM()
     event = EV_NONE;
 }
 
+void updateLEDs()
+{
+    if (!time_set) {
+        digitalWrite(LED_STATUS_G, LOW);
+        digitalWrite(LED_STATUS_R, HIGH);
+    } else if (!synced) {
+        digitalWrite(LED_STATUS_G, HIGH);
+        digitalWrite(LED_STATUS_R, HIGH);
+    } else {
+        digitalWrite(LED_STATUS_G, HIGH);
+        digitalWrite(LED_STATUS_R, LOW);
+    }
+
+    digitalWrite(LED_GREEN, (state != ST_IDLE));
+    digitalWrite(LED_YELLOW, parked);
+}
+
 void loop()
 {
-    digitalWrite(LED_BUILTIN, HIGH);
+    if (!digitalRead(ABORT_BUTTON) && state != ST_IDLE)
+        event = EV_ABORT;
+    else if (!digitalRead(HOME_BUTTON) && state != ST_HOMING_DEC)
+        event = EV_HOME;
+
     sCmd.readSerial();
     updateFSM();
+    updateLEDs();
     nexstar.run();
 }

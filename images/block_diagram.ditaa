@@ -1,6 +1,0 @@
-                               Arduino
-  +----------+               +----------+  Hand Control  +-----------+
-  |    PC    |      USB      | NexStar  |     port       | Celestron |
-  |          |<------------->| Adapter  |<-------------->|   mount   |
-  +----------+   NexStar HC  +----------+   NexStar AUX  +-----------+
-                  Protocol                   Protocol

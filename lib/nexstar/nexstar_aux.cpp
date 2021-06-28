@@ -1,8 +1,8 @@
 /******************************************************************
     Author:     Juan Menendez Blanco    <juanmb@gmail.com>
 
-    This code is part of the NexStarAdapter project:
-        https://github.com/juanmb/NexStarAdapter
+    This code is part of the NextDriver project:
+        https://github.com/juanmb/NextDriver
 
     This code is based on Andre Paquette's documentation about
     the NexStar AUX protocol:
@@ -13,30 +13,53 @@
 #include <Arduino.h>
 #include "nexstar_aux.h"
 
-#define AUX_BAUDRATE 19200
 #define RESP_TIMEOUT 800   // timeout in milliseconds
-#ifdef __AVR__
-#endif
 
-#ifdef __AVR__
-#include <SoftwareSerial.h>
-
+#ifdef TARGET_DUE
+// In Arduino DUE, use Serial1
+#define serialBegin(x) (Serial1.begin(x))
+#define serialWrite(x) (Serial1.write(x))
+#define serialFlush(x) (Serial1.flush())
+#define serialAvailable() (Serial1.available())
+#define serialRead() (Serial1.read())
+#else
+// In AVR-based Arduinos, use SoftwareSerial
 #define serialBegin(x) (serial->begin(x))
 #define serialWrite(x) (serial->write(x))
 #define serialFlush() (serial->flush())
 #define serialAvailable() (serial->available())
 #define serialRead() (serial->read())
 
+#ifndef UNIT_TEST
+#include <SoftwareSerial.h>
 SoftwareSerial *serial;
-
-#else
-// In Arduino DUE, we use Serial1
-#define serialBegin(x) (Serial1.begin(x))
-#define serialWrite(x) (Serial1.write(x))
-#define serialFlush(x) (Serial1.flush())
-#define serialAvailable() (Serial1.available())
-#define serialRead() (Serial1.read())
 #endif
+#endif
+
+// Convert nexstar angle format to radians
+float nex2rad(uint16_t angle)
+{
+    return 2*M_PI*((float)angle / 0x10000);
+}
+
+// Convert nexstar precise angle format to radians
+float pnex2rad(uint32_t angle)
+{
+    return 2*M_PI*((float)angle / 0x100000000);
+}
+
+// Convert radians to nexstar angle format
+uint16_t rad2nex(float rad)
+{
+    return (uint16_t)(rad * 0x10000 / (2*M_PI));
+}
+
+// Convert radians to nexstar precise angle format
+uint32_t rad2pnex(float rad)
+{
+    return (uint32_t)(rad * 0x100000000 / (2*M_PI));
+}
+
 
 uint8_t calcCRC(NexStarMessage *msg)
 {
@@ -50,26 +73,33 @@ uint8_t calcCRC(NexStarMessage *msg)
 }
 
 
-NexStarAux::NexStarAux(int rx, int tx, int select)
+NexStarAux::NexStarAux(Stream *serial, int select, int busy)
 {
-#ifdef __AVR__
-    serial = new SoftwareSerial(rx, tx);
-#endif
+    this->serial = serial;
+//#ifdef __AVR__
+    //serial = new SoftwareSerial(rx, tx);
+//#endif
+
     select_pin = select;
+    busy_pin = busy;
 }
 
 // Initialize pins and setup serial port
 void NexStarAux::init()
 {
-    pinMode(select_pin, INPUT);
-    serialBegin(AUX_BAUDRATE);
+    // Select and Busy pins can be the same pin, allowing very simple hardware
+    // to be used (requiring only a resistor and a diode) to interface the AUX connector.
+    pinMode(busy_pin, INPUT);
+
+    if (select_pin != busy_pin)
+        pinMode(select_pin, OUTPUT);
 }
 
 // Fill NexStarMessage struct
 // data: payload data
 // size: size of payload data
-int NexStarAux::newMessage(NexStarMessage *msg, uint8_t dest, uint8_t id,
-                               uint8_t size, char* data)
+int NexStarAux::newMessage(NexStarMessage *msg, uint8_t dest, uint8_t
+        id, uint8_t size, char* data)
 {
     if (size > MAX_PAYLOAD_SIZE) {
         return ERR_INVALID;
@@ -97,26 +127,33 @@ int NexStarAux::sendCommand(uint8_t dest, uint8_t id, uint8_t size,
     }
 
     digitalWrite(select_pin, LOW);
-    pinMode(select_pin, OUTPUT);
+    if (select_pin == busy_pin)
+        pinMode(select_pin, OUTPUT);
+
     for (int i = 0; i < size + 5; i++) {
         serialWrite(bytes[i]);
     }
+
     serialWrite(msg.crc);
     serialFlush();
-    pinMode(select_pin, INPUT);
+
+    if (select_pin == busy_pin)
+        pinMode(select_pin, INPUT);
+    else
+        digitalWrite(select_pin, HIGH);
 
     long int t0 = millis();
 
     delay(1);
-    // wait while select pin is low
-    while(digitalRead(select_pin) == HIGH) {
+    // wait while select pin is high
+    while(digitalRead(busy_pin) == HIGH) {
         if (millis() - t0 > RESP_TIMEOUT) {
             return ERR_TIMEOUT;
         }
         delay(1);
     }
-    // wait while select pin is high
-    while(digitalRead(select_pin) == LOW) {
+    // wait while select pin is low
+    while(digitalRead(busy_pin) == LOW) {
         delay(1);
         if (millis() - t0 > RESP_TIMEOUT) {
             return ERR_TIMEOUT;

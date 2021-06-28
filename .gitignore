@@ -1,12 +1,1 @@
-/build*/**
-*.*~
-*~
-*.o
-*.cpp~
-*.h~
-*.swp
-*_OLD*
-*ino_
-*.pyc
-.lvimrc
-test.run
+.pio

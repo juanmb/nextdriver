@@ -131,9 +131,6 @@ class NexStar(object):
         else:
             self.send_packet('R%04X,%04X' % coords, 1)
 
-    def sync_home_position(self):
-        self.send_packet('i', 1)
-
     def set_location(self, lat, lon):
         ''' Set location in radians '''
         lat = ephem.degrees(lat)
