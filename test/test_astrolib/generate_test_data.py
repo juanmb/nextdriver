@@ -33,7 +33,7 @@ struct TestStar {
 
 TestAngle test_angles[] = {
 {%- for a in angles %}
-    { {{ a['rad'] | round(6)}}, { {{a['deg']}}, {{a['min']}}, {{a['sec']}}, {{a['sign']}} } },
+    { {{ a['rad'] | round(8)}}, { {{a['deg']}}, {{a['min']}}, {{a['sec']}}, {{a['sign']}} } },
 {%- endfor %}
 };
 
@@ -91,7 +91,7 @@ def gen_test_dates(obs):
         '2004/02/29 12:59:11',
         '2014/12/31 16:10:22',
         '2017/12/11 22:02:33',
-        '2050/05/11 20:01:44',
+        '2037/05/11 20:01:44',
     ]
 
     dates = []
